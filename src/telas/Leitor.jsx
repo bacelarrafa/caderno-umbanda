@@ -57,13 +57,20 @@ function montarPauta(texto) {
   if (!/^## /m.test(texto || "")) return null;
   const secoes = [];
   let atual = null, buf = [];
-  const fechar = () => { if (atual && buf.join(" ").trim()) atual.paragrafos.push(buf.join(" ").trim()); buf = []; };
+  let itens = [];
+  const fecharLista = () => { if (atual && itens.length) atual.paragrafos.push({ lista: itens }); itens = []; };
+  const fechar = () => { if (atual && buf.join(" ").trim()) atual.paragrafos.push(buf.join(" ").trim()); buf = []; fecharLista(); };
   for (const bruta of texto.split("\n")) {
     const linha = bruta.trim();
     if (linha.startsWith("## ")) { fechar(); atual = { titulo: linha.slice(3).trim(), ideia: "", paragrafos: [], perguntas: [] }; secoes.push(atual); continue; }
     if (!atual) { atual = { titulo: "", ideia: "", paragrafos: [], perguntas: [] }; secoes.push(atual); }
     if (!linha) { fechar(); continue; }
     if (linha.startsWith("> ")) { fechar(); atual.ideia += (atual.ideia ? " " : "") + linha.slice(2).trim(); continue; }
+    if (linha.startsWith("- ") && !ehConfirmar(atual.titulo)) {
+      if (buf.join(" ").trim()) { atual.paragrafos.push(buf.join(" ").trim()); buf = []; }
+      itens.push(linha.slice(2).trim()); continue;
+    }
+    if (itens.length) fecharLista();
     if (linha.startsWith("? ") || (ehConfirmar(atual.titulo) && linha)) { fechar(); atual.perguntas.push(linha.replace(/^\?\s*/, "").replace(/^[-*]\s*/, "")); continue; }
     buf.push(linha);
   }
@@ -117,7 +124,7 @@ function Pauta({ pauta, termos, onTermo, termosDaAula, onFicha, fonte, ctx }) {
       {/* Temas */}
       {temas.map((t, i) => {
         const cor = CORES[i % CORES.length];
-        const [lead, ...resto] = t.ideia ? [null, ...t.paragrafos] : t.paragrafos;
+        const [lead, ...resto] = t.ideia || typeof t.paragrafos[0] !== "string" ? [null, ...t.paragrafos] : t.paragrafos;
         return (
           <section key={i} id={`tema-${i}`} style={{ scrollMarginTop: 20, marginBottom: 34 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
@@ -131,10 +138,19 @@ function Pauta({ pauta, termos, onTermo, termosDaAula, onFicha, fonte, ctx }) {
                   <Corrido texto={t.ideia || lead} termos={termos} onTermo={onTermo} tamanho={t.ideia ? 17.5 : 17} peso={t.ideia ? 500 : 400} />
                 </div>
               )}
-              {resto.map((p, j) => (
+              {resto.map((p, j) => typeof p === "string" ? (
                 <div key={j} style={{ marginBottom: 12 }}><Corrido texto={p} termos={termos} onTermo={onTermo} tamanho={16.5} /></div>
+              ) : (
+                <ul key={j} style={{ margin: "0 0 14px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
+                  {p.lista.map((item, k) => (
+                    <li key={k} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                      <span style={{ width: 7, height: 7, borderRadius: 99, background: cor, flexShrink: 0, marginTop: 11 }} />
+                      <div style={{ flex: 1 }}><Corrido texto={item} termos={termos} onTermo={onTermo} tamanho={16.5} /></div>
+                    </li>
+                  ))}
+                </ul>
               ))}
-              {ctx && <Ligacoes texto={[t.titulo, t.ideia, ...t.paragrafos].join(" ")} termos={termos} tipo="leitura" ctx={ctx} titulo="Para aprofundar nas leituras" />}
+              {ctx && <Ligacoes texto={[t.titulo, t.ideia, ...t.paragrafos.map((p) => typeof p === "string" ? p : p.lista.join(" "))].join(" ")} termos={termos} tipo="leitura" ctx={ctx} titulo="Para aprofundar nas leituras" />}
             </div>
           </section>
         );

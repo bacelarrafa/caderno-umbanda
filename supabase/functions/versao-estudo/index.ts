@@ -19,12 +19,19 @@ Regras:
 3. Corrija os termos da umbanda usando o glossário fornecido quando o contexto deixar claro.
 4. Organize por temas, na ordem em que aparecem. Cada tema começa numa linha própria com "## " seguido de um título curto.
 5. Logo abaixo de cada título, escreva uma linha começando com "> " com a ideia central do tema numa única frase.
-6. Depois, explique o tema em parágrafos curtos separados por linha em branco, em português do Brasil, com linguagem simples e na terceira pessoa ("a casa", "a dirigente"). Não use listas, negrito nem travessões.
-7. Preserve o que é próprio desta casa como foi dito, inclusive quando a aula disser que outras casas fazem diferente.
-8. Não reproduza relatos pessoais de alunos nem nomes de colegas de turma. Nomes das dirigentes podem aparecer quando forem a referência para dúvidas.
-9. Termine com uma seção "## Para confirmar com a casa". Cada dúvida numa linha própria começando com "? ", escrita como pergunta que a aluna pode fazer à dirigente.
-10. Você também recebe "O que a casa já confirmou". Use essas respostas para entender trechos confusos e corrigir termos. Não coloque no texto o que não foi dito nesta aula e não pergunte de novo o que já está respondido.
-11. Responda apenas com o texto final, sem introdução.`;
+6. Depois, desenvolva o tema em parágrafos curtos separados por linha em branco, em português do Brasil, com linguagem simples e na terceira pessoa ("a casa", "a dirigente"). Não use negrito nem travessões.
+7. Quando houver itens que se enumeram (materiais, elementos, passos de um procedimento, cuidados, regras), coloque cada um numa linha própria começando com "- ".
+8. Falas marcantes da dirigente podem aparecer entre aspas, corrigindo só o que for erro de transcrição.
+9. Preserve o que é próprio desta casa como foi dito, inclusive quando a aula disser que outras casas fazem diferente.
+10. Não reproduza relatos pessoais de alunos nem nomes de colegas de turma. Nomes das dirigentes podem aparecer quando forem a referência para dúvidas.
+11. Termine com uma seção "## Para confirmar com a casa". Cada dúvida numa linha própria começando com "? ", escrita como pergunta que a aluna pode fazer à dirigente.
+12. Você também recebe "O que a casa já confirmou". Use essas respostas para entender trechos confusos e corrigir termos. Não coloque no texto o que não foi dito nesta aula e não pergunte de novo o que já está respondido.
+13. Responda apenas com o texto final, sem introdução.`;
+
+const DETALHE = {
+  completo: `Nível de detalhe: COMPLETO. Não resuma. O objetivo é não perder nada do que foi ensinado: mantenha todas as explicações, motivos, exemplos, histórias que ilustram o ensinamento, cuidados, regras da casa, diferenças em relação a outras casas e orientações práticas. Tire apenas repetições, hesitações, conversas paralelas e trechos incompreensíveis. Uma aula longa deve gerar uma versão de estudo longa: prefira mais temas e mais parágrafos a cortar conteúdo.`,
+  resumido: `Nível de detalhe: RESUMIDO. Seja conciso: para cada tema, apenas o essencial em um ou dois parágrafos curtos, para uma revisão rápida.`,
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -63,9 +70,9 @@ Deno.serve(async (req) => {
     const principal = Deno.env.get("GEMINI_MODEL") ?? "gemini-flash-latest";
     const tentativas = [principal, principal, "gemini-flash-lite-latest"];
     const pedido = JSON.stringify({
-      systemInstruction: { parts: [{ text: INSTRUCOES }] },
+      systemInstruction: { parts: [{ text: `${INSTRUCOES}\n\n${DETALHE[corpo.nivel] ?? DETALHE.completo}` }] },
       contents: [{ role: "user", parts: [{ text: `Glossário da casa:\n${lista}\n\nO que a casa já confirmou:\n${saber}\n\nAula: ${fonte.titulo} (${fonte.data ?? ""})\n\nTranscrição:\n${fonte.texto}` }] }],
-      generationConfig: { temperature: 0.2 },
+      generationConfig: { temperature: 0.2, maxOutputTokens: 16384 },
     });
     let r: Response | null = null;
     for (let i = 0; i < tentativas.length; i++) {

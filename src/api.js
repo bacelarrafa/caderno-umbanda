@@ -64,7 +64,7 @@ export const fontes = {
     return f;
   },
   // Pedido "simples" (texto puro, sem cabeçalhos extras): o navegador não faz a checagem prévia de CORS.
-  async gerarEstudo(fonteId) {
+  async gerarEstudo(fonteId, nivel = "completo") {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error("Entre na sua conta de novo.");
     let r;
@@ -72,7 +72,7 @@ export const fontes = {
       r = await fetch(`${supabaseUrl}/functions/v1/versao-estudo`, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=UTF-8" },
-        body: JSON.stringify({ fonte_id: fonteId, token: session.access_token, apikey: supabaseChave }),
+        body: JSON.stringify({ fonte_id: fonteId, nivel, token: session.access_token, apikey: supabaseChave }),
       });
     } catch { throw new Error("Não consegui falar com a função versao-estudo no Supabase."); }
     const d = await r.json().catch(() => ({}));
@@ -90,7 +90,7 @@ async function gerarTrechos(fonte) {
   if (Array.isArray(fonte.paginas) && fonte.paginas.length) {
     fonte.paginas.forEach((p, i) => dividir(p).forEach((t) => linhas.push({ pagina: i + 1, texto: t })));
   } else {
-    dividir((fonte.estudo || fonte.texto).replace(/^(## |> |\? )/gm, "").replace(/^\[Gravação \d+\]\s*$/gm, "")).forEach((t) => linhas.push({ pagina: null, texto: t }));
+    dividir((fonte.estudo || fonte.texto).replace(/^(## |> |\? |- )/gm, "").replace(/^\[Gravação \d+\]\s*$/gm, "")).forEach((t) => linhas.push({ pagina: null, texto: t }));
   }
   const rows = linhas.map((l, i) => ({ ...l, ordem: i, fonte_id: fonte.id }));
   for (let i = 0; i < rows.length; i += 500) ok(await supabase.from("trechos").insert(rows.slice(i, i + 500)));

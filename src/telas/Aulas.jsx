@@ -192,6 +192,7 @@ function DetalheAula({ id, ctx, onVoltar }) {
   const [gerando, setGerando] = useState(false);
   const [editEstudo, setEditEstudo] = useState(null);
   const [somando, setSomando] = useState(false);
+  const [nivel, setNivel] = useState("completo");
   const recarregar = () => fontes.obter(id).then((f) => { setFonte(f); setTexto(f.texto); });
 
   useEffect(() => {
@@ -240,7 +241,7 @@ function DetalheAula({ id, ctx, onVoltar }) {
     }
     setGerando(true); setAviso("");
     try {
-      const novo = await fontes.gerarEstudo(fonte.id);
+      const novo = await fontes.gerarEstudo(fonte.id, nivel);
       const f = await fontes.salvarEstudo(fonte, novo);
       setFonte(f); setModo("estudo");
       setAviso("Versão de estudo pronta. Ela pode errar: na dúvida, confira com a transcrição e com a casa.");
@@ -297,6 +298,10 @@ function DetalheAula({ id, ctx, onVoltar }) {
               <button style={btn2} className="rot-btn" onClick={() => setEditEstudo(fonte.estudo)}><Pencil size={14} /> Editar</button>
               <button style={btn2} className="rot-btn" onClick={gerarEstudo} disabled={gerando}>{gerando ? <Girando /> : <Sparkles size={14} />} {gerando ? "Gerando, leva até um minuto" : "Gerar de novo"}</button>
               <BotaoPreparar fonte={fonte} onPronto={() => { setFonte({ ...fonte, indexada: true }); setAviso("Aula pronta para perguntas."); }} onErro={setAviso} />
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 12, color: C.sub }}>Detalhe ao gerar:</span>
+                <Escolha pequeno valor={nivel} onMudar={setNivel} opcoes={[["completo", "Completo"], ["resumido", "Resumido"]]} />
+              </span>
             </> : <>
               <button style={btn} onClick={salvarEdicaoEstudo} disabled={salvando}>{salvando ? <Girando /> : <Save size={15} />} Salvar</button>
               <button style={btn2} onClick={() => setEditEstudo(null)}>Cancelar</button>
