@@ -27,7 +27,7 @@ export const pessoas = {
 };
 
 /* ---------- Aulas e leituras ---------- */
-const CAMPOS_LISTA = "id, tipo, titulo, autor, data, visibilidade, indexada, criado_por, atualizado_em";
+const CAMPOS_LISTA = "id, tipo, titulo, autor, data, visibilidade, indexada, criado_por, criado_em, atualizado_em";
 
 export const fontes = {
   listar: async (tipo) =>
@@ -45,6 +45,19 @@ export const fontes = {
     return f;
   },
   atualizar: async (id, patch) => ok(await supabase.from("fontes").update({ ...patch, atualizado_em: new Date().toISOString() }).eq("id", id)),
+  // Soma uma gravação nova ao fim da transcrição de uma aula.
+  async adicionarGravacao(fonte, texto) {
+    const atual = (fonte.texto || "").trim();
+    const n = (atual.match(/^\[Gravação \d+\]/gm) || []).length;
+    const base = n ? atual : `[Gravação 1]\n\n${atual}`;
+    return this.salvarTexto(fonte, `${base}\n\n[Gravação ${Math.max(n, 1) + 1}]\n\n${texto.trim()}`);
+  },
+  async juntar(destino, origens) {
+    ok(await supabase.rpc("juntar_aulas", { destino, origens }));
+    const f = ok(await supabase.from("fontes").select("*").eq("id", destino).single());
+    await gerarTrechos(f);
+    return f;
+  },
   async salvarEstudo(fonte, estudo) {
     const f = ok(await supabase.from("fontes").update({ estudo, indexada: false, atualizado_em: new Date().toISOString() }).eq("id", fonte.id).select().single());
     await gerarTrechos(f);
@@ -77,7 +90,7 @@ async function gerarTrechos(fonte) {
   if (Array.isArray(fonte.paginas) && fonte.paginas.length) {
     fonte.paginas.forEach((p, i) => dividir(p).forEach((t) => linhas.push({ pagina: i + 1, texto: t })));
   } else {
-    dividir((fonte.estudo || fonte.texto).replace(/^(## |> |\? )/gm, "")).forEach((t) => linhas.push({ pagina: null, texto: t }));
+    dividir((fonte.estudo || fonte.texto).replace(/^(## |> |\? )/gm, "").replace(/^\[Gravação \d+\]\s*$/gm, "")).forEach((t) => linhas.push({ pagina: null, texto: t }));
   }
   const rows = linhas.map((l, i) => ({ ...l, ordem: i, fonte_id: fonte.id }));
   for (let i = 0; i < rows.length; i += 500) ok(await supabase.from("trechos").insert(rows.slice(i, i + 500)));
@@ -115,6 +128,12 @@ export const notas = {
 /* ---------- Busca ---------- */
 export const busca = {
   porSentido: async (vetor, tipo) => ok(await supabase.rpc("buscar_semantica", { q: vetor, n: 8, filtro_tipo: tipo })),
+  // Busca pelos termos do glossário (frase exata de cada um), usada para ligar aulas e leituras.
+  porTermos: async (termos, tipo, n = 6) => {
+    const q = termos.map((t) => `"${t.replace(/"/g, "")}"`).join(" or ");
+    if (!q) return [];
+    return ok(await supabase.rpc("buscar_texto", { q, n, filtro_tipo: tipo }));
+  },
   porPalavras: async (pergunta, tipo) => {
     const termos = (pergunta.match(/[\p{L}]{4,}/gu) || []).join(" or ");
     if (!termos) return [];

@@ -3,7 +3,7 @@ import { Plus, Trash2, ChevronLeft, ChevronRight, Check, FileText, Lock } from "
 import { fontes } from "../api";
 import { prepararBusca } from "../indexar";
 import { C, SERIF, card, iconBtn, btn, btn2, input, label, dica, erroBox, Tag, Carregando, Vazio, Aviso, Titulo, Escolha } from "../ui";
-import { Leitura } from "./Leitor";
+import { Leitura, Ligacoes, useTermos } from "./Leitor";
 import { lembrarFonte } from "./Inicio";
 import { Notas, BotaoPreparar } from "./Comum";
 import { Progresso } from "./Aulas";
@@ -130,6 +130,7 @@ function DetalheLeitura({ id, ctx, onVoltar }) {
   const [pagina, setPagina] = useState(1);
   const [erro, setErro] = useState("");
   const [aviso, setAviso] = useState("");
+  const termos = useTermos(ctx.glossario);
 
   useEffect(() => {
     fontes.obter(id).then((f) => { setFonte(f); setPagina(ctx.paginaInicial || 1); }).catch((e) => setErro(e.message));
@@ -183,6 +184,12 @@ function DetalheLeitura({ id, ctx, onVoltar }) {
           <input type="number" min={1} max={total} value={p} onChange={(e) => setPagina(Number(e.target.value) || 1)} style={{ ...input, width: 70, textAlign: "center", padding: "7px 8px" }} />
           <span style={{ fontSize: 13, color: C.sub }}>de {total}</span>
           <button className="rot-btn" style={iconBtn} disabled={p >= total} onClick={() => setPagina(p + 1)} title="Próxima página"><ChevronRight size={16} /></button>
+        </div>
+      )}
+
+      {texto && (
+        <div style={{ marginBottom: 22 }}>
+          <Ligacoes key={`${fonte.id}-${p}`} texto={texto} termos={termos} tipo="aula" ctx={ctx} titulo="O que as aulas disseram sobre isso" max={3} />
         </div>
       )}
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2, ChevronLeft, Check, Wand2, Lightbulb, FileAudio, Save, Repeat, Sparkles, Pencil } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, Check, Wand2, Lightbulb, FileAudio, Save, Repeat, Sparkles, Pencil, Combine } from "lucide-react";
 import { fontes } from "../api";
 import { prepararBusca } from "../indexar";
 import { aplicarGlossario, sugerir, substituir } from "../corretor";
@@ -15,39 +15,66 @@ export function Aulas({ ctx, abertaId, setAbertaId }) {
   const [nova, setNova] = useState(false);
   const [erro, setErro] = useState("");
 
+  const [juntando, setJuntando] = useState(null);
   const carregar = () => fontes.listar("aula").then(setLista).catch((e) => setErro(e.message));
   useEffect(() => { if (!abertaId) carregar(); }, [abertaId]);
+
+  const juntar = async (dia, ordem) => {
+    if (!window.confirm(`Juntar as ${ordem.length} gravações de ${dataBR(dia)} numa aula só? Elas viram partes da mesma transcrição, na ordem em que foram criadas. Destaques, respostas e anotações são mantidos. A versão de estudo precisa ser gerada de novo.`)) return;
+    setJuntando(dia); setErro("");
+    try { await fontes.juntar(ordem[0].id, ordem.slice(1).map((a) => a.id)); await carregar(); }
+    catch (e) { setErro(e.message); }
+    setJuntando(null);
+  };
 
   if (abertaId) return <DetalheAula id={abertaId} ctx={ctx} onVoltar={() => setAbertaId(null)} />;
 
   return (
     <div>
       <Titulo sub="O que a casa ensinou, aula por aula." direita={ctx.podeEditar && !nova && <button style={btn} onClick={() => setNova(true)}><Plus size={15} /> Nova aula</button>}>Aulas</Titulo>
-      {nova && <NovaAula ctx={ctx} onCancelar={() => setNova(false)} onCriada={(id) => { setNova(false); setAbertaId(id); }} />}
+      {nova && <NovaAula ctx={ctx} lista={lista || []} onCancelar={() => setNova(false)} onCriada={(id) => { setNova(false); setAbertaId(id); }} />}
       {erro && <div style={erroBox}>{erro}</div>}
       {!lista && !erro && <Carregando />}
       {lista?.length === 0 && !nova && (
         <Vazio>{ctx.podeEditar ? "Adicione a primeira aula com o áudio gravado ou colando a transcrição." : "Ainda não tem nenhuma aula aqui."}</Vazio>
       )}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {lista?.map((a, i) => (
-          <button key={a.id} className="rot-row" onClick={() => setAbertaId(a.id)}
-            style={{ ...card, padding: "14px 16px", cursor: "pointer", textAlign: "left", color: C.ink, display: "flex", gap: 14, alignItems: "baseline", width: "100%" }}>
-            <span style={{ fontFamily: SERIF, fontSize: 15, color: C.accent, minWidth: 44 }}>{dataBR(a.data).slice(0, 5)}</span>
-            <span style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ display: "block", fontFamily: SERIF, fontSize: 17 }}>{a.titulo}</span>
-              {!a.indexada && ctx.podeEditar && <span style={{ fontSize: 12, color: C.faint }}>Busca por sentido ainda não preparada</span>}
-            </span>
-          </button>
-        ))}
-      </div>
+      {Object.entries((lista || []).reduce((acc, a) => { (acc[a.data || "sem data"] = acc[a.data || "sem data"] || []).push(a); return acc; }, {}))
+        .map(([dia, aulas]) => {
+          const ordem = [...aulas].sort((x, y) => (x.criado_em || "").localeCompare(y.criado_em || ""));
+          return (
+            <section key={dia} style={{ marginBottom: 18 }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                <div style={{ fontFamily: SERIF, fontSize: 17, color: C.accent }}>{dia === "sem data" ? "Sem data" : dataExtenso(dia)}</div>
+                {ctx.podeEditar && aulas.length > 1 && (
+                  <button style={{ ...btn2, padding: "5px 10px", fontSize: 12.5 }} disabled={juntando === dia} onClick={() => juntar(dia, ordem)}>
+                    {juntando === dia ? <Girando size={13} /> : <Combine size={13} />} Juntar em uma aula
+                  </button>
+                )}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {ordem.map((a) => (
+                  <button key={a.id} className="rot-row" onClick={() => setAbertaId(a.id)}
+                    style={{ ...card, padding: "14px 16px", cursor: "pointer", textAlign: "left", color: C.ink, display: "block", width: "100%" }}>
+                    <span style={{ display: "block", fontFamily: SERIF, fontSize: 17 }}>{a.titulo}</span>
+                    {!a.indexada && ctx.podeEditar && <span style={{ fontSize: 12, color: C.faint }}>Busca por sentido ainda não preparada</span>}
+                  </button>
+                ))}
+              </div>
+            </section>
+          );
+        })}
     </div>
   );
 }
 
-function NovaAula({ ctx, onCriada, onCancelar }) {
+const dataExtenso = (d) => new Date(d + "T12:00:00").toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
+
+export function NovaAula({ ctx, onCriada, onCancelar, lista = [], somarEm = null }) {
   const [titulo, setTitulo] = useState("");
   const [data, setData] = useState(hoje());
+  const doDia = somarEm ? [somarEm] : lista.filter((a) => a.data === data);
+  const [destino, setDestino] = useState("auto");
+  const alvo = somarEm ? somarEm.id : destino === "auto" ? (doDia[0]?.id || "nova") : destino;
   const [modo, setModo] = useState("audio");
   const [texto, setTexto] = useState("");
   const [qualidade, setQualidade] = useState("gpu" in navigator ? "maxima" : "preciso");
@@ -58,6 +85,12 @@ function NovaAula({ ctx, onCriada, onCancelar }) {
   const salvar = async (bruto) => {
     setStatus({ msg: "Salvando a aula" });
     const { texto: corrigido } = aplicarGlossario(bruto, ctx.glossario);
+    if (alvo !== "nova") {
+      const atual = await fontes.obter(alvo);
+      await fontes.adicionarGravacao(atual, corrigido);
+      try { await prepararBusca(alvo, (m) => setStatus({ msg: m, sub: "Atualizando a busca da aula" })); } catch { /* dá para preparar depois */ }
+      return onCriada(alvo, true);
+    }
     const f = await fontes.criar({ tipo: "aula", titulo: titulo.trim() || `Aula de ${dataBR(data)}`, data, texto: corrigido, visibilidade: "todos" });
     try { await prepararBusca(f.id, (m) => setStatus({ msg: m, sub: "Preparando a aula para a aba Perguntas" })); } catch { /* dá para preparar depois */ }
     onCriada(f.id);
@@ -84,10 +117,20 @@ function NovaAula({ ctx, onCriada, onCancelar }) {
 
   return (
     <div style={{ ...card, padding: 16, marginBottom: 16 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 150px", gap: 10, marginBottom: 12 }}>
-        <div><span style={label}>Título</span><input style={input} value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ex.: Aula 1, a curimba" /></div>
-        <div><span style={label}>Data</span><input style={input} type="date" value={data} onChange={(e) => setData(e.target.value)} /></div>
-      </div>
+      {somarEm ? (
+        <div style={{ fontFamily: SERIF, fontSize: 16, marginBottom: 12 }}>Nova gravação para esta aula</div>
+      ) : <>
+        <div style={{ display: "grid", gridTemplateColumns: alvo === "nova" ? "minmax(0,1fr) 150px" : "150px", gap: 10, marginBottom: 12 }}>
+          {alvo === "nova" && <div><span style={label}>Título</span><input style={input} value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ex.: Aula 1, a curimba" /></div>}
+          <div><span style={label}>Data</span><input style={input} type="date" value={data} onChange={(e) => { setData(e.target.value); setDestino("auto"); }} /></div>
+        </div>
+        {doDia.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <span style={label}>Já existe aula nesse dia</span>
+            <Escolha pequeno valor={alvo} onMudar={setDestino} opcoes={[...doDia.map((a) => [a.id, `Somar a "${a.titulo}"`]), ["nova", "Criar aula separada"]]} />
+          </div>
+        )}
+      </>}
       <div style={{ marginBottom: 12 }}><Escolha valor={modo} onMudar={setModo} opcoes={[["audio", "Transcrever áudio"], ["texto", "Colar texto"]]} /></div>
 
       {modo === "audio" ? (
@@ -115,7 +158,7 @@ function NovaAula({ ctx, onCriada, onCancelar }) {
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <button style={btn2} onClick={onCancelar} disabled={!!status}>Cancelar</button>
         <button style={{ ...btn, opacity: pode && !status ? 1 : 0.5 }} disabled={!pode || !!status} onClick={rodar}>
-          {modo === "audio" ? <><Wand2 size={15} /> Transcrever e salvar</> : <><Check size={15} /> Salvar aula</>}
+          {modo === "audio" ? <><Wand2 size={15} /> Transcrever e salvar</> : <><Check size={15} /> {alvo === "nova" ? "Salvar aula" : "Somar à aula"}</>}
         </button>
       </div>
     </div>
@@ -148,6 +191,8 @@ function DetalheAula({ id, ctx, onVoltar }) {
   const [certo, setCerto] = useState("");
   const [gerando, setGerando] = useState(false);
   const [editEstudo, setEditEstudo] = useState(null);
+  const [somando, setSomando] = useState(false);
+  const recarregar = () => fontes.obter(id).then((f) => { setFonte(f); setTexto(f.texto); });
 
   useEffect(() => {
     fontes.obter(id).then((f) => { setFonte(f); setTexto(f.texto); setModo(f.estudo ? "estudo" : "ler"); lembrarFonte(f); }).catch((e) => setErro(e.message));
@@ -210,6 +255,8 @@ function DetalheAula({ id, ctx, onVoltar }) {
     setSalvando(false);
   };
 
+  const gravacoes = (fonte.texto.match(/^\[Gravação \d+\]/gm) || []).length;
+
   const opcoesModo = [
     ...(fonte.estudo ? [["estudo", "Estudo"]] : []),
     ["ler", "Transcrição"],
@@ -234,7 +281,12 @@ function DetalheAula({ id, ctx, onVoltar }) {
         <input value={fonte.titulo} onChange={(e) => setFonte({ ...fonte, titulo: e.target.value })} onBlur={() => fontes.atualizar(fonte.id, { titulo: fonte.titulo })}
           style={{ ...input, fontFamily: SERIF, fontSize: 24, fontWeight: 500, marginBottom: 6 }} />
       ) : <h1 style={{ fontFamily: SERIF, fontSize: 28, fontWeight: 500, margin: "0 0 6px", letterSpacing: -0.4, lineHeight: 1.2 }}>{fonte.titulo}</h1>}
-      <div style={{ fontSize: 13, color: C.sub, marginBottom: 18 }}>Aula de {dataBR(fonte.data)}, {palavras(fonte.texto)} palavras</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
+        <span style={{ fontSize: 13, color: C.sub }}>Aula de {dataBR(fonte.data)}, {palavras(fonte.texto)} palavras{gravacoes > 1 ? `, ${gravacoes} gravações` : ""}</span>
+        {ctx.podeEditar && !somando && <button style={{ ...btn2, padding: "4px 10px", fontSize: 12.5 }} onClick={() => setSomando(true)}><Plus size={13} /> Adicionar gravação</button>}
+      </div>
+      {somando && <NovaAula ctx={ctx} somarEm={fonte} onCancelar={() => setSomando(false)}
+        onCriada={async () => { setSomando(false); await recarregar(); setModo(fonte.estudo ? "estudo" : "ler"); setAviso(fonte.estudo ? "Gravação somada à aula. A versão de estudo ainda não inclui a parte nova: toque em Gerar de novo." : "Gravação somada à aula."); }} />}
 
       <Aviso onFechar={() => setAviso("")}>{aviso}</Aviso>
 

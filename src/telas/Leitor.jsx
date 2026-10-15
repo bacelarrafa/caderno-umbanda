@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Highlighter, BookOpenText, Check, Pencil } from "lucide-react";
-import { destaques, respostas as rApi } from "../api";
+import { destaques, respostas as rApi, busca, fontes as fApi } from "../api";
 import { semAcento } from "../corretor";
 import { C, SERIF, btn, btn2, input, label, Painel, Tag, Girando } from "../ui";
 
@@ -33,6 +33,20 @@ export function termosNoTexto(texto, termos) {
 export function TextoComTermos({ texto, termos, onTermo, tamanho = 17, termosDaAula, onFicha, fonte, ctx }) {
   const pauta = useMemo(() => montarPauta(texto), [texto]);
   if (pauta) return <Pauta pauta={pauta} termos={termos} onTermo={onTermo} termosDaAula={termosDaAula} onFicha={onFicha} fonte={fonte} ctx={ctx} />;
+  if (/^\[Gravação \d+\]\s*$/m.test(texto || "")) {
+    // Transcrição com várias gravações: cada parte ganha um rótulo.
+    const partes = texto.split(/^\[Gravação (\d+)\]\s*$/m);
+    const out = [];
+    if (partes[0].trim()) out.push(<Corrido key="p0" texto={partes[0].trim()} termos={termos} onTermo={onTermo} tamanho={tamanho} />);
+    for (let i = 1; i < partes.length; i += 2) {
+      out.push(<div key={`g${i}`} style={{ display: "flex", alignItems: "center", gap: 10, margin: i > 1 || out.length ? "26px 0 10px" : "0 0 10px" }}>
+        <span style={{ fontSize: 12, fontWeight: 500, color: C.accent, background: C.accentSoft, borderRadius: 99, padding: "3px 10px" }}>Gravação {partes[i]}</span>
+        <span style={{ flex: 1, height: 1, background: C.line }} />
+      </div>);
+      out.push(<Corrido key={`t${i}`} texto={(partes[i + 1] || "").trim()} termos={termos} onTermo={onTermo} tamanho={tamanho} />);
+    }
+    return <>{out}</>;
+  }
   return <Corrido texto={texto} termos={termos} onTermo={onTermo} tamanho={tamanho} />;
 }
 
@@ -120,6 +134,7 @@ function Pauta({ pauta, termos, onTermo, termosDaAula, onFicha, fonte, ctx }) {
               {resto.map((p, j) => (
                 <div key={j} style={{ marginBottom: 12 }}><Corrido texto={p} termos={termos} onTermo={onTermo} tamanho={16.5} /></div>
               ))}
+              {ctx && <Ligacoes texto={[t.titulo, t.ideia, ...t.paragrafos].join(" ")} termos={termos} tipo="leitura" ctx={ctx} titulo="Para aprofundar nas leituras" />}
             </div>
           </section>
         );
@@ -127,6 +142,50 @@ function Pauta({ pauta, termos, onTermo, termosDaAula, onFicha, fonte, ctx }) {
 
       {/* Dúvidas para levar */}
       {confirmar && <Confirmar perguntas={confirmar.perguntas} termos={termos} onTermo={onTermo} fonte={fonte} ctx={ctx} />}
+    </div>
+  );
+}
+
+// Liga um trecho às aulas ou leituras que falam dos mesmos termos do glossário.
+let titulosCache = null;
+const titulos = () => (titulosCache ||= fApi.titulos().then((ts) => Object.fromEntries(ts.map((t) => [t.id, t]))).catch(() => { titulosCache = null; return {}; }));
+
+// Termos que aparecem em quase tudo e não ajudam a achar ligações específicas.
+const GERAIS = new Set(["gira", "terreiro", "medium", "dirigente", "doutrina", "fundamento", "incorporacao", "obrigacao"]);
+
+export function Ligacoes({ texto, termos, tipo, ctx, titulo, max = 2, ignorarFonte }) {
+  const chaves = useMemo(() => termosNoTexto(texto, termos).filter((t) => !GERAIS.has(semAcento(t.termo))).slice(0, 4).map((t) => t.termo), [texto, termos]);
+  const [itens, setItens] = useState(null);
+  const [aberto, setAberto] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    if (!chaves.length) { setItens([]); return; }
+    Promise.all([busca.porTermos(chaves, tipo, 8), titulos()]).then(([rs, por]) => {
+      if (!vivo) return;
+      const vistos = new Set();
+      setItens(rs.filter((r) => por[r.fonte_id] && r.fonte_id !== ignorarFonte && !vistos.has(`${r.fonte_id}-${r.pagina}`) && vistos.add(`${r.fonte_id}-${r.pagina}`))
+        .slice(0, max).map((r) => ({ ...r, fonte: por[r.fonte_id] })));
+    }).catch(() => vivo && setItens([]));
+    return () => { vivo = false; };
+  }, [chaves.join("|"), tipo]);
+  if (!itens?.length) return null;
+  const cor = tipo === "leitura" ? C.folha : C.accent;
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ fontSize: 12, color: cor, fontWeight: 500, marginBottom: 6 }}>{titulo}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {itens.map((r, i) => (
+          <div key={r.trecho_id} style={{ border: `1px solid ${C.line}`, borderLeft: `3px solid ${cor}`, borderRadius: "0 10px 10px 0", background: C.surface, padding: "8px 12px" }}>
+            <button onClick={() => setAberto(aberto === i ? null : i)} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", textAlign: "left", width: "100%", color: C.ink }}>
+              <span style={{ fontFamily: SERIF, fontSize: 14.5 }}>{r.fonte.titulo}</span>
+              <span style={{ fontSize: 12, color: C.sub }}>{r.pagina ? `, p. ${r.pagina}` : r.fonte.data ? `, ${r.fonte.data.split("-").reverse().join("/")}` : ""}</span>
+            </button>
+            <div style={{ fontFamily: SERIF, fontSize: 14, lineHeight: 1.55, color: C.sub, marginTop: 4,
+              display: aberto === i ? "block" : "-webkit-box", WebkitLineClamp: aberto === i ? "unset" : 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{r.texto}</div>
+            {aberto === i && <button onClick={() => ctx.abrirFonte(r.fonte, r.pagina)} style={{ ...btn2, marginTop: 8, padding: "4px 10px", fontSize: 12.5 }}>Abrir {tipo === "leitura" ? "a leitura" : "a aula"}</button>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
