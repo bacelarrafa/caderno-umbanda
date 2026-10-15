@@ -11,3 +11,5 @@ if (!url || !anonKey) {
 }
 
 export const supabase = createClient(url || "http://localhost", anonKey || "sem-chave");
+export const supabaseUrl = url;
+export const supabaseChave = anonKey;

@@ -1,5 +1,5 @@
 // Toda conversa com o banco passa por aqui.
-import { supabase } from "./supabaseClient";
+import { supabase, supabaseUrl, supabaseChave } from "./supabaseClient";
 import { trechos as dividir } from "./corretor";
 
 const ok = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
@@ -50,15 +50,21 @@ export const fontes = {
     await gerarTrechos(f);
     return f;
   },
+  // Pedido "simples" (texto puro, sem cabeçalhos extras): o navegador não faz a checagem prévia de CORS.
   async gerarEstudo(fonteId) {
-    const { data, error } = await supabase.functions.invoke("versao-estudo", { body: { fonte_id: fonteId } });
-    if (error) {
-      let msg = error.message;
-      try { msg = (await error.context.json()).erro || msg; } catch { /* resposta sem corpo */ }
-      throw new Error(msg);
-    }
-    if (data?.erro) throw new Error(data.erro);
-    return data.texto;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error("Entre na sua conta de novo.");
+    let r;
+    try {
+      r = await fetch(`${supabaseUrl}/functions/v1/versao-estudo`, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        body: JSON.stringify({ fonte_id: fonteId, token: session.access_token, apikey: supabaseChave }),
+      });
+    } catch { throw new Error("Não consegui falar com a função versao-estudo no Supabase."); }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.erro) throw new Error(d.erro || d.message || `erro ${r.status}`);
+    return d.texto;
   },
   excluir: async (id) => ok(await supabase.from("fontes").delete().eq("id", id)),
 };

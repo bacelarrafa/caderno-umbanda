@@ -4,7 +4,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version, x-region",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const json = (body: unknown, status = 200) =>
@@ -25,21 +25,30 @@ Regras:
 9. Responda apenas com o texto final, sem introdução.`;
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  if (req.method === "OPTIONS") {
+    // Aceita os cabeçalhos que o navegador pedir, para não quebrar quando a biblioteca mudar.
+    const pedidos = req.headers.get("Access-Control-Request-Headers");
+    return new Response("ok", { headers: { ...cors, ...(pedidos ? { "Access-Control-Allow-Headers": pedidos } : {}) } });
+  }
   try {
     const chaveGemini = Deno.env.get("GEMINI_API_KEY");
     if (!chaveGemini) return json({ erro: "Falta o secret GEMINI_API_KEY nas Edge Functions do Supabase." }, 500);
 
+    // O app manda o login dentro do corpo, num pedido simples que o navegador não precisa checar antes.
+    const corpo = await req.json().catch(() => ({}));
+    const autorizacao = req.headers.get("Authorization") ?? (corpo.token ? `Bearer ${corpo.token}` : "");
+    const chavePublica = req.headers.get("apikey") ?? corpo.apikey ?? Deno.env.get("SUPABASE_ANON_KEY");
+
     // Age como a pessoa logada: as regras de acesso do banco continuam valendo.
-    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, req.headers.get("apikey") ?? Deno.env.get("SUPABASE_ANON_KEY")!, {
-      global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, chavePublica!, {
+      global: { headers: { Authorization: autorizacao } },
     });
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return json({ erro: "Entre na sua conta de novo." }, 401);
     const { data: perfil } = await supabase.from("perfis").select("papel, aprovado").eq("id", user.id).maybeSingle();
     if (!perfil?.aprovado || !["admin", "editor"].includes(perfil.papel)) return json({ erro: "Só editores podem gerar a versão de estudo." }, 403);
 
-    const { fonte_id } = await req.json();
+    const { fonte_id } = corpo;
     const { data: fonte } = await supabase.from("fontes").select("titulo, data, texto").eq("id", fonte_id).maybeSingle();
     if (!fonte) return json({ erro: "Aula não encontrada." }, 404);
     const { data: glossario } = await supabase.from("glossario").select("termo, significado");
