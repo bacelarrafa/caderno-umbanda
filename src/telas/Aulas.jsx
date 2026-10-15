@@ -255,7 +255,7 @@ function DetalheAula({ id, ctx, onVoltar }) {
           <textarea style={{ ...input, minHeight: 480, lineHeight: 1.7, fontSize: 15, fontFamily: SERIF }} value={editEstudo} onChange={(e) => setEditEstudo(e.target.value)} />
         ) : <>
           <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 16, lineHeight: 1.5 }}>Versão organizada a partir da transcrição. Toque num termo para ver o significado, ou selecione um trecho para guardar como destaque.</div>
-          <Leitura texto={fonte.estudo} ctx={ctx} fonte={fonte} />
+          <Leitura texto={fonte.estudo} ctx={ctx} fonte={fonte} comTermos />
           <div style={{ height: 28 }} />
           <Notas fonteId={fonte.id} />
         </>}

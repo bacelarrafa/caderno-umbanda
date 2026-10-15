@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Trash2, X, ChevronLeft, Pencil, Check, Link2 } from "lucide-react";
-import { glossario as api, ocorrencias, fontes, destaques, notasTermo } from "../api";
+import { glossario as api, ocorrencias, fontes, destaques, notasTermo, respostas } from "../api";
 import { semAcento } from "../corretor";
 import { C, SERIF, card, iconBtn, btn, btn2, input, label, erroBox, Tag, Titulo, Secao, Carregando, Vazio, Girando, Escolha, dataBR } from "../ui";
 import { useTermos, termosNoTexto, CartaoDestaque } from "./Leitor";
@@ -84,6 +84,7 @@ function Ficha({ termo, ctx, onVoltar }) {
   const termos = useTermos(ctx.glossario);
   const [achados, setAchados] = useState(null);
   const [meus, setMeus] = useState(null);
+  const [daCasa, setDaCasa] = useState(null);
   const [editando, setEditando] = useState(false);
   const [rascunho, setRascunho] = useState(termo.significado);
   const [erro, setErro] = useState("");
@@ -96,6 +97,7 @@ function Ficha({ termo, ctx, onVoltar }) {
         setAchados(rs.map((r) => ({ ...r, fonte: por[r.fonte_id] })).filter((r) => r.fonte));
       }).catch((e) => { setErro(e.message); setAchados([]); });
     destaques.listar({ termoId: termo.id }).then(setMeus).catch(() => setMeus([]));
+    respostas.listar({ termoId: termo.id }).then(setDaCasa).catch(() => setDaCasa([]));
   }, [termo.id]);
 
   // Termos que aparecem junto com este: é aqui que as coisas se casam.
@@ -155,6 +157,19 @@ function Ficha({ termo, ctx, onVoltar }) {
         </p>
       )}
       {erro && <div style={{ ...erroBox, margin: "12px 0" }}>{erro}</div>}
+
+      {daCasa?.length > 0 && <>
+        <Secao>A casa confirmou</Secao>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {daCasa.map((r) => (
+            <div key={r.id} style={{ ...card, padding: "12px 15px", borderLeft: `3px solid ${C.folha}` }}>
+              <div style={{ fontSize: 13.5, color: C.sub, marginBottom: 4 }}>{r.pergunta}</div>
+              <div style={{ fontFamily: SERIF, fontSize: 15.5, lineHeight: 1.6 }}>{r.resposta}</div>
+              {r.fontes && <div style={{ marginTop: 6 }}><Tag>{r.fontes.titulo}</Tag></div>}
+            </div>
+          ))}
+        </div>
+      </>}
 
       {ligados.length > 0 && <>
         <Secao>Se liga com</Secao>

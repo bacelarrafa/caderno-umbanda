@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Highlighter, BookOpenText } from "lucide-react";
-import { destaques } from "../api";
+import { Highlighter, BookOpenText, Check, Pencil } from "lucide-react";
+import { destaques, respostas as rApi } from "../api";
 import { semAcento } from "../corretor";
 import { C, SERIF, btn, btn2, input, label, Painel, Tag, Girando } from "../ui";
 
@@ -29,32 +29,197 @@ export function termosNoTexto(texto, termos) {
   return [...achados.values()].sort((a, b) => b.n - a.n);
 }
 
-// Texto de leitura. Linhas que começam com "## " viram títulos de seção.
-export function TextoComTermos({ texto, termos, onTermo, tamanho = 17 }) {
-  const blocos = useMemo(() => {
-    if (!/^## /m.test(texto || "")) return null;
-    const out = [];
-    let corpo = [];
-    for (const linha of texto.split("\n")) {
-      if (linha.startsWith("## ")) {
-        if (corpo.join("").trim()) out.push({ t: corpo.join("\n").trim() });
-        corpo = [];
-        out.push({ h: linha.slice(3).trim() });
-      } else corpo.push(linha);
-    }
-    if (corpo.join("").trim()) out.push({ t: corpo.join("\n").trim() });
-    return out;
-  }, [texto]);
-
-  if (blocos) {
-    return blocos.map((b, i) => b.h
-      ? <h2 key={i} style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500, margin: i ? "30px 0 8px" : "0 0 8px", color: b.h.startsWith("Para confirmar") ? C.ouro : C.cafe }}>{b.h}</h2>
-      : <Corrido key={i} texto={b.t} termos={termos} onTermo={onTermo} tamanho={tamanho} />);
-  }
+// Texto de leitura. Se tiver títulos "## ", vira uma pauta de estudo com seções numeradas.
+export function TextoComTermos({ texto, termos, onTermo, tamanho = 17, termosDaAula, onFicha, fonte, ctx }) {
+  const pauta = useMemo(() => montarPauta(texto), [texto]);
+  if (pauta) return <Pauta pauta={pauta} termos={termos} onTermo={onTermo} termosDaAula={termosDaAula} onFicha={onFicha} fonte={fonte} ctx={ctx} />;
   return <Corrido texto={texto} termos={termos} onTermo={onTermo} tamanho={tamanho} />;
 }
 
-function Corrido({ texto, termos, onTermo, tamanho }) {
+const ehConfirmar = (t) => /^para confirmar/i.test(t);
+
+// Lê o texto da versão de estudo: "## " título, "> " ideia central, "? " dúvida para a casa.
+function montarPauta(texto) {
+  if (!/^## /m.test(texto || "")) return null;
+  const secoes = [];
+  let atual = null, buf = [];
+  const fechar = () => { if (atual && buf.join(" ").trim()) atual.paragrafos.push(buf.join(" ").trim()); buf = []; };
+  for (const bruta of texto.split("\n")) {
+    const linha = bruta.trim();
+    if (linha.startsWith("## ")) { fechar(); atual = { titulo: linha.slice(3).trim(), ideia: "", paragrafos: [], perguntas: [] }; secoes.push(atual); continue; }
+    if (!atual) { atual = { titulo: "", ideia: "", paragrafos: [], perguntas: [] }; secoes.push(atual); }
+    if (!linha) { fechar(); continue; }
+    if (linha.startsWith("> ")) { fechar(); atual.ideia += (atual.ideia ? " " : "") + linha.slice(2).trim(); continue; }
+    if (linha.startsWith("? ") || (ehConfirmar(atual.titulo) && linha)) { fechar(); atual.perguntas.push(linha.replace(/^\?\s*/, "").replace(/^[-*]\s*/, "")); continue; }
+    buf.push(linha);
+  }
+  fechar();
+  return secoes.filter((x) => x.titulo || x.paragrafos.length);
+}
+
+const CORES = ["#2F5D8A", "#A23B2A", "#4F6B3A", "#C99A2E", "#7A4E2D", "#2E2219"];
+
+function Pauta({ pauta, termos, onTermo, termosDaAula, onFicha, fonte, ctx }) {
+  const temas = pauta.filter((x) => x.titulo && !ehConfirmar(x.titulo));
+  const confirmar = pauta.find((x) => ehConfirmar(x.titulo));
+  const ir = (i) => document.getElementById(`tema-${i}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  return (
+    <div>
+      {/* Mapa da aula */}
+      <div style={{ background: C.surface, border: `1px solid ${C.line}`, borderRadius: 14, padding: "16px 18px", marginBottom: 28 }}>
+        <div style={{ fontSize: 12, color: C.sub, marginBottom: 10 }}>Nesta aula, {temas.length} temas</div>
+        <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+          {temas.map((t, i) => (
+            <li key={i}>
+              <button onClick={() => ir(i)} className="rot-btn" style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", border: "none", background: "transparent", padding: "6px 6px", borderRadius: 8, cursor: "pointer", color: C.ink }}>
+                <Conta n={i + 1} cor={CORES[i % CORES.length]} pequena />
+                <span style={{ fontFamily: SERIF, fontSize: 15.5 }}>{t.titulo}</span>
+              </button>
+            </li>
+          ))}
+          {confirmar && (
+            <li>
+              <button onClick={() => document.getElementById("tema-confirmar")?.scrollIntoView({ behavior: "smooth", block: "start" })} className="rot-btn"
+                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", border: "none", background: "transparent", padding: "6px 6px", borderRadius: 8, cursor: "pointer", color: C.ouro }}>
+                <span style={{ width: 22, height: 22, borderRadius: 99, border: `1.5px solid ${C.ouro}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>?</span>
+                <span style={{ fontFamily: SERIF, fontSize: 15.5 }}>{confirmar.perguntas.length} pontos para confirmar com a casa</span>
+              </button>
+            </li>
+          )}
+        </ol>
+        {termosDaAula?.length > 0 && (
+          <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 12, paddingTop: 12 }}>
+            <div style={{ fontSize: 12, color: C.sub, marginBottom: 8 }}>Termos da aula</div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+              {termosDaAula.slice(0, 16).map((t) => (
+                <button key={t.id} onClick={() => onFicha?.(t.id)} style={{ border: `1px solid ${t.significado ? C.line : "#E6CFA3"}`, background: t.significado ? C.bg : C.ouroSoft, color: C.ink, borderRadius: 99, padding: "3px 10px", fontSize: 12.5, fontFamily: SERIF, cursor: "pointer" }}>{t.termo}</button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Temas */}
+      {temas.map((t, i) => {
+        const cor = CORES[i % CORES.length];
+        const [lead, ...resto] = t.ideia ? [null, ...t.paragrafos] : t.paragrafos;
+        return (
+          <section key={i} id={`tema-${i}`} style={{ scrollMarginTop: 20, marginBottom: 34 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+              <Conta n={i + 1} cor={cor} />
+              <h2 style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 500, margin: 0, lineHeight: 1.25, letterSpacing: -0.2 }}>{t.titulo}</h2>
+            </div>
+            <div style={{ paddingLeft: 42 }}>
+              {(t.ideia || lead) && (
+                <div style={{ borderLeft: `3px solid ${cor}`, background: C.surface, borderRadius: "0 12px 12px 0", padding: "12px 16px", marginBottom: 16 }}>
+                  {t.ideia && <div style={{ fontSize: 11.5, color: cor, fontWeight: 500, marginBottom: 4 }}>Ideia central</div>}
+                  <Corrido texto={t.ideia || lead} termos={termos} onTermo={onTermo} tamanho={t.ideia ? 17.5 : 17} peso={t.ideia ? 500 : 400} />
+                </div>
+              )}
+              {resto.map((p, j) => (
+                <div key={j} style={{ marginBottom: 12 }}><Corrido texto={p} termos={termos} onTermo={onTermo} tamanho={16.5} /></div>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+
+      {/* Dúvidas para levar */}
+      {confirmar && <Confirmar perguntas={confirmar.perguntas} termos={termos} onTermo={onTermo} fonte={fonte} ctx={ctx} />}
+    </div>
+  );
+}
+
+const norm = (t) => semAcento(t).replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+
+// Dúvidas da aula. Quem é editora pode responder; a resposta vai para as fichas
+// e alimenta as próximas versões de estudo.
+function Confirmar({ perguntas, termos, onTermo, fonte, ctx }) {
+  const [lista, setLista] = useState(null);
+  const [abrindo, setAbrindo] = useState(null);
+  const [texto, setTexto] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
+
+  useEffect(() => { if (fonte?.id) rApi.listar({ fonteId: fonte.id }).then(setLista).catch(() => setLista([])); else setLista([]); }, [fonte?.id]);
+  const achar = (q) => (lista || []).find((r) => norm(r.pergunta) === norm(q));
+  const respondidas = perguntas.filter((q) => achar(q)).length;
+
+  const salvar = async (q) => {
+    setSalvando(true); setErro("");
+    try {
+      const ja = achar(q);
+      const ids = termosNoTexto(`${q} ${texto}`, termos).map((t) => t.id);
+      const r = ja ? await rApi.atualizar(ja.id, { resposta: texto.trim(), termos: ids })
+        : await rApi.criar({ fonte_id: fonte.id, pergunta: q, resposta: texto.trim(), termos: ids });
+      setLista((l) => [r, ...(l || []).filter((x) => x.id !== r.id)]);
+      setAbrindo(null); setTexto("");
+    } catch (e) { setErro(e.message); }
+    setSalvando(false);
+  };
+
+  return (
+    <section id="tema-confirmar" style={{ scrollMarginTop: 20, background: C.ouroSoft, border: "1px solid #E6CFA3", borderRadius: 14, padding: "18px 18px 8px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+        <h2 style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500, margin: "0 0 4px", color: "#6B4A14" }}>Para confirmar com a casa</h2>
+        {lista && <span style={{ fontSize: 12.5, color: "#6B4A14" }}>{respondidas} de {perguntas.length} respondidas</span>}
+      </div>
+      <div style={{ fontSize: 12.5, color: "#6B4A14", opacity: 0.85, marginBottom: 12, lineHeight: 1.5 }}>
+        {ctx?.podeEditar ? "Se você já sabe, responda aqui. A resposta vai para as fichas e o caderno usa nas próximas aulas." : "Leve estas dúvidas para a próxima aula."}
+      </div>
+      {erro && <div style={{ fontSize: 13, color: C.erro, marginBottom: 8 }}>{erro}</div>}
+      {perguntas.map((q, i) => {
+        const r = achar(q);
+        const aberto = abrindo === i;
+        return (
+          <div key={i} style={{ padding: "12px 0", borderTop: i ? "1px solid #E6CFA3" : "none" }}>
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+              <span style={{ width: 22, height: 22, borderRadius: 99, border: `1.5px solid ${r ? C.folha : C.ouro}`, background: r ? C.folha : "transparent", color: r ? "#FBF6EC" : C.ouro,
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, flexShrink: 0, marginTop: 3 }}>{r ? <Check size={13} /> : "?"}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Corrido texto={q} termos={termos} onTermo={onTermo} tamanho={16} />
+                {r && !aberto && (
+                  <div style={{ marginTop: 8, background: C.surface, border: `1px solid ${C.line}`, borderLeft: `3px solid ${C.folha}`, borderRadius: "0 10px 10px 0", padding: "10px 12px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                      <span style={{ fontSize: 11.5, color: C.folha, fontWeight: 500 }}>A casa confirmou</span>
+                      {ctx?.podeEditar && <button aria-label="Editar resposta" onClick={() => { setAbrindo(i); setTexto(r.resposta); }} style={{ border: "none", background: "transparent", cursor: "pointer", color: C.faint, padding: 0 }}><Pencil size={13} /></button>}
+                    </div>
+                    <Corrido texto={r.resposta} termos={termos} onTermo={onTermo} tamanho={15.5} />
+                  </div>
+                )}
+                {aberto && (
+                  <div style={{ marginTop: 8 }}>
+                    <textarea autoFocus style={{ ...input, minHeight: 80, fontFamily: SERIF, fontSize: 15, lineHeight: 1.55 }} value={texto} onChange={(e) => setTexto(e.target.value)}
+                      placeholder="O que a casa ensina sobre isso, nas suas palavras" />
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+                      <button style={btn2} onClick={() => { setAbrindo(null); setTexto(""); }}>Cancelar</button>
+                      <button style={{ ...btn, opacity: texto.trim() ? 1 : 0.5 }} disabled={!texto.trim() || salvando} onClick={() => salvar(q)}>{salvando ? <Girando /> : <Check size={14} />} Salvar resposta</button>
+                    </div>
+                  </div>
+                )}
+                {!r && !aberto && ctx?.podeEditar && (
+                  <button onClick={() => { setAbrindo(i); setTexto(""); }} style={{ ...btn2, marginTop: 8, padding: "5px 11px", fontSize: 12.5, background: "transparent", borderColor: "#E6CFA3", color: "#6B4A14" }}>Eu sei a resposta</button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+// Número do tema dentro de uma conta de guia.
+function Conta({ n, cor, pequena }) {
+  const t = pequena ? 22 : 30;
+  return (
+    <span aria-hidden style={{ width: t, height: t, borderRadius: 99, background: cor, color: cor === "#C99A2E" ? C.ink : "#FBF6EC", display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: pequena ? 11.5 : 14, fontWeight: 600, flexShrink: 0, boxShadow: "inset 0 -2px 0 rgba(0,0,0,0.15)" }}>{n}</span>
+  );
+}
+
+function Corrido({ texto, termos, onTermo, tamanho, peso = 400 }) {
   const partes = useMemo(() => {
     if (!termos.re || !texto) return [texto];
     const out = [];
@@ -71,7 +236,7 @@ function Corrido({ texto, termos, onTermo, tamanho }) {
   }, [texto, termos]);
 
   return (
-    <div style={{ fontFamily: SERIF, fontSize: tamanho, lineHeight: 1.8, color: C.ink, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+    <div style={{ fontFamily: SERIF, fontSize: tamanho, fontWeight: peso, lineHeight: 1.75, color: C.ink, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
       {partes.map((p, i) => typeof p === "string" ? p
         : <button key={p.k} className="termo" onClick={() => onTermo(p.g)}>{p.t}</button>)}
     </div>
@@ -95,7 +260,7 @@ export function useSelecao(ref) {
 }
 
 // Bloco completo: texto, definição ao tocar num termo e botão para guardar destaque.
-export function Leitura({ texto, ctx, fonte, pagina }) {
+export function Leitura({ texto, ctx, fonte, pagina, comTermos }) {
   const ref = useRef();
   const termos = useTermos(ctx.glossario);
   const [termo, setTermo] = useState(null);
@@ -120,7 +285,7 @@ export function Leitura({ texto, ctx, fonte, pagina }) {
 
   return (
     <>
-      <div ref={ref}><TextoComTermos texto={texto} termos={termos} onTermo={setTermo} /></div>
+      <div ref={ref}><TextoComTermos texto={texto} termos={termos} onTermo={setTermo} termosDaAula={comTermos ? termosNoTexto(texto, termos) : null} onFicha={ctx.abrirFicha} fonte={fonte} ctx={ctx} /></div>
 
       {(sel || ok) && !salvando && !termo && (
         <div style={{ position: "fixed", left: 0, right: 0, bottom: "calc(78px + env(safe-area-inset-bottom, 0px))", zIndex: 30, display: "flex", justifyContent: "center", padding: "0 16px", animation: "subir .15s ease" }}>

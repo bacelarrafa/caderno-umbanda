@@ -77,7 +77,7 @@ async function gerarTrechos(fonte) {
   if (Array.isArray(fonte.paginas) && fonte.paginas.length) {
     fonte.paginas.forEach((p, i) => dividir(p).forEach((t) => linhas.push({ pagina: i + 1, texto: t })));
   } else {
-    dividir((fonte.estudo || fonte.texto).replace(/^## /gm, "")).forEach((t) => linhas.push({ pagina: null, texto: t }));
+    dividir((fonte.estudo || fonte.texto).replace(/^(## |> |\? )/gm, "")).forEach((t) => linhas.push({ pagina: null, texto: t }));
   }
   const rows = linhas.map((l, i) => ({ ...l, ordem: i, fonte_id: fonte.id }));
   for (let i = 0; i < rows.length; i += 500) ok(await supabase.from("trechos").insert(rows.slice(i, i + 500)));
@@ -143,3 +143,16 @@ export const notasTermo = {
 export async function ocorrencias(termo) {
   return ok(await supabase.rpc("buscar_texto", { q: `"${termo.replace(/"/g, "")}"`, n: 40, filtro_tipo: null }));
 }
+
+/* ---------- Respostas da casa ---------- */
+export const respostas = {
+  listar: async ({ fonteId, termoId } = {}) => {
+    let q = supabase.from("respostas").select("*, fontes(titulo, tipo)").order("criado_em", { ascending: false }).limit(500);
+    if (fonteId) q = q.eq("fonte_id", fonteId);
+    if (termoId) q = q.contains("termos", [termoId]);
+    return ok(await q);
+  },
+  criar: async (r) => ok(await supabase.from("respostas").insert(r).select("*, fontes(titulo, tipo)").single()),
+  atualizar: async (id, patch) => ok(await supabase.from("respostas").update({ ...patch, atualizado_em: new Date().toISOString() }).eq("id", id).select("*, fontes(titulo, tipo)").single()),
+  excluir: async (id) => ok(await supabase.from("respostas").delete().eq("id", id)),
+};

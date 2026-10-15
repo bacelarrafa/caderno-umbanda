@@ -18,11 +18,13 @@ Regras:
 2. Quando não der para entender com segurança, não adivinhe: deixe de fora ou escreva [trecho incerto].
 3. Corrija os termos da umbanda usando o glossário fornecido quando o contexto deixar claro.
 4. Organize por temas, na ordem em que aparecem. Cada tema começa numa linha própria com "## " seguido de um título curto.
-5. Escreva em parágrafos curtos, em português do Brasil, com linguagem simples e na terceira pessoa ("a casa", "a dirigente"). Não use listas nem travessões.
-6. Preserve o que é próprio desta casa como foi dito, inclusive quando a aula disser que outras casas fazem diferente.
-7. Não reproduza relatos pessoais de alunos nem nomes de colegas de turma. Nomes das dirigentes podem aparecer quando forem a referência para dúvidas.
-8. Termine com uma seção "## Para confirmar com a casa", listando em frases curtas o que ficou ambíguo.
-9. Responda apenas com o texto final, sem introdução.`;
+5. Logo abaixo de cada título, escreva uma linha começando com "> " com a ideia central do tema numa única frase.
+6. Depois, explique o tema em parágrafos curtos separados por linha em branco, em português do Brasil, com linguagem simples e na terceira pessoa ("a casa", "a dirigente"). Não use listas, negrito nem travessões.
+7. Preserve o que é próprio desta casa como foi dito, inclusive quando a aula disser que outras casas fazem diferente.
+8. Não reproduza relatos pessoais de alunos nem nomes de colegas de turma. Nomes das dirigentes podem aparecer quando forem a referência para dúvidas.
+9. Termine com uma seção "## Para confirmar com a casa". Cada dúvida numa linha própria começando com "? ", escrita como pergunta que a aluna pode fazer à dirigente.
+10. Você também recebe "O que a casa já confirmou". Use essas respostas para entender trechos confusos e corrigir termos. Não coloque no texto o que não foi dito nesta aula e não pergunte de novo o que já está respondido.
+11. Responda apenas com o texto final, sem introdução.`;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -53,18 +55,31 @@ Deno.serve(async (req) => {
     if (!fonte) return json({ erro: "Aula não encontrada." }, 404);
     const { data: glossario } = await supabase.from("glossario").select("termo, significado");
     const lista = (glossario ?? []).map((g) => `${g.termo}${g.significado ? `: ${g.significado}` : ""}`).join("\n");
+    const { data: confirmadas } = await supabase.from("respostas").select("pergunta, resposta").order("criado_em", { ascending: false }).limit(80);
+    const saber = (confirmadas ?? []).map((c) => `Pergunta: ${c.pergunta}\nResposta da casa: ${c.resposta}`).join("\n\n") || "Nada ainda.";
 
-    const modelo = Deno.env.get("GEMINI_MODEL") ?? "gemini-flash-latest";
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": chaveGemini },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: INSTRUCOES }] },
-        contents: [{ role: "user", parts: [{ text: `Glossário da casa:\n${lista}\n\nAula: ${fonte.titulo} (${fonte.data ?? ""})\n\nTranscrição:\n${fonte.texto}` }] }],
-        generationConfig: { temperature: 0.2 },
-      }),
+    // Tenta o modelo principal; se o Gemini estiver sobrecarregado, espera um pouco e tenta de novo,
+    // e por último usa um modelo mais leve.
+    const principal = Deno.env.get("GEMINI_MODEL") ?? "gemini-flash-latest";
+    const tentativas = [principal, principal, "gemini-flash-lite-latest"];
+    const pedido = JSON.stringify({
+      systemInstruction: { parts: [{ text: INSTRUCOES }] },
+      contents: [{ role: "user", parts: [{ text: `Glossário da casa:\n${lista}\n\nO que a casa já confirmou:\n${saber}\n\nAula: ${fonte.titulo} (${fonte.data ?? ""})\n\nTranscrição:\n${fonte.texto}` }] }],
+      generationConfig: { temperature: 0.2 },
     });
+    let r: Response | null = null;
+    for (let i = 0; i < tentativas.length; i++) {
+      if (i > 0) await new Promise((ok) => setTimeout(ok, 3000 * i));
+      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${tentativas[i]}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": chaveGemini },
+        body: pedido,
+      });
+      if (![500, 503].includes(r.status)) break;
+    }
+    if (!r) return json({ erro: "Não consegui falar com o Gemini." }, 502);
     if (r.status === 429) return json({ erro: "O limite gratuito do Gemini foi atingido. Tente de novo em alguns minutos." }, 429);
+    if (r.status === 503 || r.status === 500) return json({ erro: "O Gemini está sobrecarregado agora. Tente de novo em alguns minutos." }, 503);
     if (!r.ok) return json({ erro: `O Gemini recusou o pedido (${r.status}): ${(await r.text()).slice(0, 300)}` }, 502);
     const dados = await r.json();
     const texto = (dados.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("").trim();
