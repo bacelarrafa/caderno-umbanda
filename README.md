@@ -31,7 +31,15 @@ App de estudo do curso de desenvolvimento mediúnico, com acesso por login e apr
    - `VITE_SUPABASE_ANON_KEY` com a chave anon public
 2. Suba os arquivos deste projeto. O deploy roda sozinho.
 
-### 3. Primeiro acesso
+### 3. Versão de estudo com o Gemini (opcional)
+1. Em aistudio.google.com, crie uma chave de API (plano gratuito).
+2. No SQL Editor do Supabase, rode `supabase/03-versao-estudo.sql` (se rodou o schema.sql desta versão, já está incluído).
+3. Em Edge Functions, crie uma função chamada `versao-estudo` pelo editor do painel e cole o conteúdo de `supabase/functions/versao-estudo/index.ts`.
+4. Nos secrets das Edge Functions, crie `GEMINI_API_KEY` com a chave. Opcional: `GEMINI_MODEL` para trocar o modelo (padrão `gemini-flash-latest`).
+
+No plano gratuito, o Google pode usar o conteúdo enviado para melhorar os modelos e revisores humanos podem ler. O app avisa antes de enviar.
+
+### 4. Primeiro acesso
 Abra o site e crie sua conta antes de passar o link para qualquer pessoa: a primeira conta vira admin.
 
 ## Privacidade

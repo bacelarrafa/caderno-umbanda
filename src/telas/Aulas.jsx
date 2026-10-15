@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2, ChevronLeft, Check, Wand2, Lightbulb, FileAudio, Save, Repeat } from "lucide-react";
+import { Plus, Trash2, ChevronLeft, Check, Wand2, Lightbulb, FileAudio, Save, Repeat, Sparkles, Pencil } from "lucide-react";
 import { fontes } from "../api";
 import { prepararBusca } from "../indexar";
 import { aplicarGlossario, sugerir, substituir } from "../corretor";
@@ -146,9 +146,11 @@ function DetalheAula({ id, ctx, onVoltar }) {
   const [salvando, setSalvando] = useState(false);
   const [errado, setErrado] = useState("");
   const [certo, setCerto] = useState("");
+  const [gerando, setGerando] = useState(false);
+  const [editEstudo, setEditEstudo] = useState(null);
 
   useEffect(() => {
-    fontes.obter(id).then((f) => { setFonte(f); setTexto(f.texto); lembrarFonte(f); }).catch((e) => setErro(e.message));
+    fontes.obter(id).then((f) => { setFonte(f); setTexto(f.texto); setModo(f.estudo ? "estudo" : "ler"); lembrarFonte(f); }).catch((e) => setErro(e.message));
   }, [id]);
 
   const sujo = fonte && texto !== fonte.texto;
@@ -183,6 +185,37 @@ function DetalheAula({ id, ctx, onVoltar }) {
     gravar(novo, `${tirou} palavras repetidas removidas.`);
   };
 
+  const gerarEstudo = async () => {
+    let ciente = false;
+    try { ciente = sessionStorage.getItem("cienteGemini") === "1"; } catch { /* sem armazenamento */ }
+    if (!ciente) {
+      const ok = window.confirm("A transcrição desta aula vai ser enviada ao Gemini, do Google, no plano gratuito. Nesse plano o Google pode usar o conteúdo para melhorar os modelos dele, e revisores humanos podem ler. Continuar?");
+      if (!ok) return;
+      try { sessionStorage.setItem("cienteGemini", "1"); } catch { /* sem armazenamento */ }
+    }
+    setGerando(true); setAviso("");
+    try {
+      const novo = await fontes.gerarEstudo(fonte.id);
+      const f = await fontes.salvarEstudo(fonte, novo);
+      setFonte(f); setModo("estudo");
+      setAviso("Versão de estudo pronta. Ela pode errar: na dúvida, confira com a transcrição e com a casa.");
+    } catch (e) { setAviso(`Não consegui gerar: ${e.message}`); }
+    setGerando(false);
+  };
+
+  const salvarEdicaoEstudo = async () => {
+    setSalvando(true);
+    try { const f = await fontes.salvarEstudo(fonte, editEstudo); setFonte(f); setEditEstudo(null); setAviso("Versão de estudo salva."); }
+    catch (e) { setAviso(`Não consegui salvar: ${e.message}`); }
+    setSalvando(false);
+  };
+
+  const opcoesModo = [
+    ...(fonte.estudo ? [["estudo", "Estudo"]] : []),
+    ["ler", "Transcrição"],
+    ...(ctx.podeEditar ? [["editar", "Revisar"]] : []),
+  ];
+
   const excluir = async () => {
     if (!window.confirm("Excluir esta aula para todo mundo?")) return;
     try { await fontes.excluir(fonte.id); onVoltar(); } catch (e) { setAviso(`Não consegui excluir: ${e.message}`); }
@@ -193,7 +226,7 @@ function DetalheAula({ id, ctx, onVoltar }) {
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
         <button className="rot-btn" style={iconBtn} onClick={onVoltar} aria-label="Voltar"><ChevronLeft size={16} /></button>
         <div style={{ flex: 1 }} />
-        {ctx.podeEditar && <Escolha pequeno valor={modo} onMudar={(m) => { if (m === "ler" && sujo && !window.confirm("Sair sem salvar as alterações?")) return; if (m === "ler") setTexto(fonte.texto); setModo(m); }} opcoes={[["ler", "Ler"], ["editar", "Revisar transcrição"]]} />}
+        {opcoesModo.length > 1 && <Escolha pequeno valor={modo} onMudar={(m) => { if (modo === "editar" && m !== "editar" && sujo && !window.confirm("Sair sem salvar as alterações?")) return; if (m !== "editar") setTexto(fonte.texto); setEditEstudo(null); setModo(m); }} opcoes={opcoesModo} />}
         {ctx.podeEditar && <button className="rot-btn" style={iconBtn} onClick={excluir} aria-label="Excluir aula"><Trash2 size={15} color={C.erro} /></button>}
       </div>
 
@@ -205,7 +238,35 @@ function DetalheAula({ id, ctx, onVoltar }) {
 
       <Aviso onFechar={() => setAviso("")}>{aviso}</Aviso>
 
-      {modo === "ler" ? <>
+      {modo === "estudo" ? <>
+        {ctx.podeEditar && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+            {editEstudo == null ? <>
+              <button style={btn2} className="rot-btn" onClick={() => setEditEstudo(fonte.estudo)}><Pencil size={14} /> Editar</button>
+              <button style={btn2} className="rot-btn" onClick={gerarEstudo} disabled={gerando}>{gerando ? <Girando /> : <Sparkles size={14} />} {gerando ? "Gerando, leva até um minuto" : "Gerar de novo"}</button>
+              <BotaoPreparar fonte={fonte} onPronto={() => { setFonte({ ...fonte, indexada: true }); setAviso("Aula pronta para perguntas."); }} onErro={setAviso} />
+            </> : <>
+              <button style={btn} onClick={salvarEdicaoEstudo} disabled={salvando}>{salvando ? <Girando /> : <Save size={15} />} Salvar</button>
+              <button style={btn2} onClick={() => setEditEstudo(null)}>Cancelar</button>
+            </>}
+          </div>
+        )}
+        {editEstudo != null ? (
+          <textarea style={{ ...input, minHeight: 480, lineHeight: 1.7, fontSize: 15, fontFamily: SERIF }} value={editEstudo} onChange={(e) => setEditEstudo(e.target.value)} />
+        ) : <>
+          <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 16, lineHeight: 1.5 }}>Versão organizada a partir da transcrição. Toque num termo para ver o significado, ou selecione um trecho para guardar como destaque.</div>
+          <Leitura texto={fonte.estudo} ctx={ctx} fonte={fonte} />
+          <div style={{ height: 28 }} />
+          <Notas fonteId={fonte.id} />
+        </>}
+      </> : modo === "ler" ? <>
+        {ctx.podeEditar && !fonte.estudo && (
+          <div style={{ ...dica, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
+            <Sparkles size={16} style={{ flexShrink: 0 }} />
+            <span style={{ flex: "1 1 220px" }}>Transcrição confusa? Gere uma versão de estudo organizada por temas.</span>
+            <button style={{ ...btn, background: C.ouro }} onClick={gerarEstudo} disabled={gerando}>{gerando ? <Girando /> : <Sparkles size={14} />} {gerando ? "Gerando" : "Gerar versão de estudo"}</button>
+          </div>
+        )}
         <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 14, lineHeight: 1.5 }}>Toque num termo sublinhado para ver o significado. Selecione um trecho para guardar como destaque.</div>
         <Leitura texto={texto} ctx={ctx} fonte={fonte} />
         <div style={{ height: 28 }} />

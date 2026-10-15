@@ -29,8 +29,32 @@ export function termosNoTexto(texto, termos) {
   return [...achados.values()].sort((a, b) => b.n - a.n);
 }
 
-// Texto de leitura com os termos do glossário sublinhados e clicáveis.
+// Texto de leitura. Linhas que começam com "## " viram títulos de seção.
 export function TextoComTermos({ texto, termos, onTermo, tamanho = 17 }) {
+  const blocos = useMemo(() => {
+    if (!/^## /m.test(texto || "")) return null;
+    const out = [];
+    let corpo = [];
+    for (const linha of texto.split("\n")) {
+      if (linha.startsWith("## ")) {
+        if (corpo.join("").trim()) out.push({ t: corpo.join("\n").trim() });
+        corpo = [];
+        out.push({ h: linha.slice(3).trim() });
+      } else corpo.push(linha);
+    }
+    if (corpo.join("").trim()) out.push({ t: corpo.join("\n").trim() });
+    return out;
+  }, [texto]);
+
+  if (blocos) {
+    return blocos.map((b, i) => b.h
+      ? <h2 key={i} style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500, margin: i ? "30px 0 8px" : "0 0 8px", color: b.h.startsWith("Para confirmar") ? C.ouro : C.cafe }}>{b.h}</h2>
+      : <Corrido key={i} texto={b.t} termos={termos} onTermo={onTermo} tamanho={tamanho} />);
+  }
+  return <Corrido texto={texto} termos={termos} onTermo={onTermo} tamanho={tamanho} />;
+}
+
+function Corrido({ texto, termos, onTermo, tamanho }) {
   const partes = useMemo(() => {
     if (!termos.re || !texto) return [texto];
     const out = [];

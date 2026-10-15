@@ -27,7 +27,7 @@ export function Inicio({ ctx }) {
     progresso.listar().then(setProg).catch(() => setProg([]));
   }, []);
 
-  const daAula = useMemo(() => (aula ? termosNoTexto(aula.texto, termos) : []), [aula, termos]);
+  const daAula = useMemo(() => (aula ? termosNoTexto(aula.estudo || aula.texto, termos) : []), [aula, termos]);
   const paraCompletar = daAula.filter((t) => !t.significado);
 
   const elegiveis = ctx.glossario.filter((g) => g.significado);

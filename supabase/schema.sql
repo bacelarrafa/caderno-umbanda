@@ -47,6 +47,7 @@ create table public.fontes (
   data date,
   texto text not null default '',
   paginas jsonb,
+  estudo text,
   visibilidade text not null default 'todos' check (visibilidade in ('todos', 'privada')),
   indexada boolean not null default false,
   criado_por uuid references public.perfis(id) default auth.uid(),
