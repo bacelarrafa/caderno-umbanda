@@ -65,6 +65,16 @@ cantar cantando ponto pontos ainda depois antes trabalho entender questão dentr
 gente coisa coisas forma momento vezes outra outro outras outros muito pouco
 `.split(/\s+/).filter(Boolean));
 
+// Terminações comuns de plural e conjugação: "atravessou" não é erro de "atravessar".
+const FLEXOES = new Set(["ou", "ando", "endo", "indo", "ado", "ada", "ados", "adas", "am", "ei", "aram", "avam", "oes", "aes", "ar", "er", "ir", "ava", "aste", "da", "do", "das", "dos", "r", "ndo", "va"]);
+function ehFlexao(palavra, termo) {
+  for (let corte = 2; corte <= 4; corte++) {
+    const raiz = termo.slice(0, -corte);
+    if (raiz.length >= 5 && palavra.startsWith(raiz) && FLEXOES.has(palavra.slice(raiz.length))) return true;
+  }
+  return false;
+}
+
 // Procura palavras parecidas com termos do glossário (possíveis erros de transcrição).
 export function sugerir(texto, glossario, ignorados = []) {
   const ign = new Set(ignorados.map(semAcento));
@@ -87,8 +97,9 @@ export function sugerir(texto, glossario, ignorados = []) {
     let melhor = null;
     for (const t of termos) {
       if (Math.abs(t.length - base.length) > 4) continue;
+      if (ehFlexao(k, semAcento(t))) { melhor = null; break; }
       const s = semelhanca(base, t);
-      if (s >= 0.7 && (!melhor || s > melhor.s)) melhor = { termo: plural ? t + "s" : t, s };
+      if (s >= 0.75 && (!melhor || s > melhor.s)) melhor = { termo: plural ? t + "s" : t, s };
     }
     if (melhor) sugestoes.push({ errado: palavra, certo: melhor.termo, confianca: melhor.s, n });
   }

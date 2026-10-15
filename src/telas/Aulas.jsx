@@ -1,0 +1,248 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { Plus, Trash2, ChevronLeft, Check, Wand2, Lightbulb, FileAudio, Save, Repeat } from "lucide-react";
+import { fontes } from "../api";
+import { prepararBusca } from "../indexar";
+import { aplicarGlossario, sugerir, substituir } from "../corretor";
+import { lerAudio, transcrever } from "../ml/cliente";
+import { tirarRepeticoes } from "../ml/limpeza";
+import { C, SERIF, card, iconBtn, btn, btn2, input, label, dica, erroBox, Tag, Girando, Carregando, Vazio, Aviso, Titulo, Escolha, hoje, dataBR, palavras } from "../ui";
+import { Leitura } from "./Leitor";
+import { lembrarFonte } from "./Inicio";
+import { Notas, BotaoPreparar } from "./Comum";
+
+export function Aulas({ ctx, abertaId, setAbertaId }) {
+  const [lista, setLista] = useState(null);
+  const [nova, setNova] = useState(false);
+  const [erro, setErro] = useState("");
+
+  const carregar = () => fontes.listar("aula").then(setLista).catch((e) => setErro(e.message));
+  useEffect(() => { if (!abertaId) carregar(); }, [abertaId]);
+
+  if (abertaId) return <DetalheAula id={abertaId} ctx={ctx} onVoltar={() => setAbertaId(null)} />;
+
+  return (
+    <div>
+      <Titulo sub="O que a casa ensinou, aula por aula." direita={ctx.podeEditar && !nova && <button style={btn} onClick={() => setNova(true)}><Plus size={15} /> Nova aula</button>}>Aulas</Titulo>
+      {nova && <NovaAula ctx={ctx} onCancelar={() => setNova(false)} onCriada={(id) => { setNova(false); setAbertaId(id); }} />}
+      {erro && <div style={erroBox}>{erro}</div>}
+      {!lista && !erro && <Carregando />}
+      {lista?.length === 0 && !nova && (
+        <Vazio>{ctx.podeEditar ? "Adicione a primeira aula com o áudio gravado ou colando a transcrição." : "Ainda não tem nenhuma aula aqui."}</Vazio>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {lista?.map((a, i) => (
+          <button key={a.id} className="rot-row" onClick={() => setAbertaId(a.id)}
+            style={{ ...card, padding: "14px 16px", cursor: "pointer", textAlign: "left", color: C.ink, display: "flex", gap: 14, alignItems: "baseline", width: "100%" }}>
+            <span style={{ fontFamily: SERIF, fontSize: 15, color: C.accent, minWidth: 44 }}>{dataBR(a.data).slice(0, 5)}</span>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: "block", fontFamily: SERIF, fontSize: 17 }}>{a.titulo}</span>
+              {!a.indexada && ctx.podeEditar && <span style={{ fontSize: 12, color: C.faint }}>Busca por sentido ainda não preparada</span>}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NovaAula({ ctx, onCriada, onCancelar }) {
+  const [titulo, setTitulo] = useState("");
+  const [data, setData] = useState(hoje());
+  const [modo, setModo] = useState("audio");
+  const [texto, setTexto] = useState("");
+  const [qualidade, setQualidade] = useState("gpu" in navigator ? "maxima" : "preciso");
+  const [arquivo, setArquivo] = useState(null);
+  const [status, setStatus] = useState(null);
+  const [erro, setErro] = useState("");
+
+  const salvar = async (bruto) => {
+    setStatus({ msg: "Salvando a aula" });
+    const { texto: corrigido } = aplicarGlossario(bruto, ctx.glossario);
+    const f = await fontes.criar({ tipo: "aula", titulo: titulo.trim() || `Aula de ${dataBR(data)}`, data, texto: corrigido, visibilidade: "todos" });
+    try { await prepararBusca(f.id, (m) => setStatus({ msg: m, sub: "Preparando a aula para a aba Perguntas" })); } catch { /* dá para preparar depois */ }
+    onCriada(f.id);
+  };
+
+  const rodar = async () => {
+    setErro("");
+    try {
+      if (modo === "texto") return await salvar(texto);
+      setStatus({ msg: "Lendo o áudio" });
+      const audio = await lerAudio(arquivo);
+      const t = await transcrever(audio, qualidade, (p) => {
+        if (p.tipo === "download") setStatus({ msg: `${p.etapa} (${p.pct}%)`, sub: "Só na primeira vez. Depois fica salvo no navegador." });
+        if (p.tipo === "parcial") setStatus({ msg: `Transcrevendo ${p.feito} de ${p.total} trechos`, pct: p.feito / p.total, previa: p.texto.slice(-240) });
+      });
+      await salvar(t);
+    } catch (e) {
+      setStatus(null);
+      setErro(modo === "audio" ? `Não consegui transcrever: ${e.message}` : `Não consegui salvar: ${e.message}`);
+    }
+  };
+
+  const pode = modo === "audio" ? !!arquivo : !!texto.trim();
+
+  return (
+    <div style={{ ...card, padding: 16, marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 150px", gap: 10, marginBottom: 12 }}>
+        <div><span style={label}>Título</span><input style={input} value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ex.: Aula 1, a curimba" /></div>
+        <div><span style={label}>Data</span><input style={input} type="date" value={data} onChange={(e) => setData(e.target.value)} /></div>
+      </div>
+      <div style={{ marginBottom: 12 }}><Escolha valor={modo} onMudar={setModo} opcoes={[["audio", "Transcrever áudio"], ["texto", "Colar texto"]]} /></div>
+
+      {modo === "audio" ? (
+        <>
+          <label style={{ ...card, display: "flex", alignItems: "center", gap: 10, padding: 14, cursor: "pointer", borderStyle: "dashed", marginBottom: 10 }}>
+            <FileAudio size={18} color={C.sub} />
+            <span style={{ fontSize: 13.5, color: arquivo ? C.ink : C.sub }}>{arquivo ? arquivo.name : "Escolher a gravação (m4a, mp3, wav)"}</span>
+            <input type="file" accept="audio/*" hidden onChange={(e) => setArquivo(e.target.files[0] || null)} />
+          </label>
+          <span style={label}>Modelo</span>
+          <select style={{ ...input, marginBottom: 12 }} value={qualidade} onChange={(e) => setQualidade(e.target.value)}>
+            {"gpu" in navigator && <option value="maxima">Máxima (bem melhor, precisa de computador com Chrome ou Edge)</option>}
+            <option value="preciso">Preciso (funciona em qualquer navegador)</option>
+            <option value="rapido">Rápido (bom para testar)</option>
+          </select>
+          <div style={{ fontSize: 12, color: C.faint, marginBottom: 12, lineHeight: 1.5 }}>O áudio é transcrito no seu navegador e não é enviado para lugar nenhum. Só o texto é salvo.</div>
+        </>
+      ) : (
+        <textarea style={{ ...input, minHeight: 160, lineHeight: 1.55, marginBottom: 12 }} value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Cole aqui a transcrição da aula" />
+      )}
+
+      {status && <Progresso status={status} />}
+      {erro && <div style={{ ...erroBox, marginBottom: 12 }}>{erro}</div>}
+
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button style={btn2} onClick={onCancelar} disabled={!!status}>Cancelar</button>
+        <button style={{ ...btn, opacity: pode && !status ? 1 : 0.5 }} disabled={!pode || !!status} onClick={rodar}>
+          {modo === "audio" ? <><Wand2 size={15} /> Transcrever e salvar</> : <><Check size={15} /> Salvar aula</>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function Progresso({ status }) {
+  return (
+    <div style={{ ...card, padding: 12, marginBottom: 12, background: "#F7F7F5" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}><Girando /> {status.msg}</div>
+      {status.sub && <div style={{ fontSize: 12, color: C.faint, marginTop: 4 }}>{status.sub}</div>}
+      {status.pct != null && (
+        <div style={{ height: 4, background: C.line, borderRadius: 4, marginTop: 10 }}>
+          <div style={{ height: 4, width: `${status.pct * 100}%`, background: C.accent, borderRadius: 4, transition: "width .3s" }} />
+        </div>
+      )}
+      {status.previa && <div style={{ fontSize: 12.5, color: C.sub, marginTop: 10, lineHeight: 1.5 }}>…{status.previa}</div>}
+    </div>
+  );
+}
+
+function DetalheAula({ id, ctx, onVoltar }) {
+  const [fonte, setFonte] = useState(null);
+  const [texto, setTexto] = useState("");
+  const [modo, setModo] = useState("ler");
+  const [erro, setErro] = useState("");
+  const [aviso, setAviso] = useState("");
+  const [salvando, setSalvando] = useState(false);
+  const [errado, setErrado] = useState("");
+  const [certo, setCerto] = useState("");
+
+  useEffect(() => {
+    fontes.obter(id).then((f) => { setFonte(f); setTexto(f.texto); lembrarFonte(f); }).catch((e) => setErro(e.message));
+  }, [id]);
+
+  const sujo = fonte && texto !== fonte.texto;
+  const sugestoes = useMemo(() => (ctx.podeEditar && modo === "editar" ? sugerir(texto, ctx.glossario, ctx.ignorados) : []), [texto, ctx.glossario, ctx.ignorados, ctx.podeEditar, modo]);
+
+  if (erro) return <div style={erroBox}>{erro}</div>;
+  if (!fonte) return <Carregando />;
+
+  const gravar = async (novo, msg) => {
+    setSalvando(true);
+    try { const f = await fontes.salvarTexto(fonte, novo); setFonte(f); setTexto(f.texto); if (msg) setAviso(msg); }
+    catch (e) { setAviso(`Não consegui salvar: ${e.message}`); }
+    setSalvando(false);
+  };
+
+  const corrigir = async (e, c) => {
+    const r = substituir(texto, e, c);
+    await gravar(r.texto, `"${e}" virou "${c}" em ${r.n} ${r.n === 1 ? "lugar" : "lugares"}. Nas próximas aulas a correção é automática.`);
+    await ctx.aprender(e, c);
+  };
+
+  const reaplicar = () => {
+    const r = aplicarGlossario(texto, ctx.glossario);
+    if (!r.total) return setAviso("Nada para corrigir com o glossário atual.");
+    gravar(r.texto, `${r.total} termos corrigidos pelo glossário.`);
+  };
+
+  const limparLoops = () => {
+    const novo = tirarRepeticoes(texto);
+    const tirou = palavras(texto) - palavras(novo);
+    if (!tirou) return setAviso("Não achei repetições em sequência.");
+    gravar(novo, `${tirou} palavras repetidas removidas.`);
+  };
+
+  const excluir = async () => {
+    if (!window.confirm("Excluir esta aula para todo mundo?")) return;
+    try { await fontes.excluir(fonte.id); onVoltar(); } catch (e) { setAviso(`Não consegui excluir: ${e.message}`); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+        <button className="rot-btn" style={iconBtn} onClick={onVoltar} aria-label="Voltar"><ChevronLeft size={16} /></button>
+        <div style={{ flex: 1 }} />
+        {ctx.podeEditar && <Escolha pequeno valor={modo} onMudar={(m) => { if (m === "ler" && sujo && !window.confirm("Sair sem salvar as alterações?")) return; if (m === "ler") setTexto(fonte.texto); setModo(m); }} opcoes={[["ler", "Ler"], ["editar", "Revisar transcrição"]]} />}
+        {ctx.podeEditar && <button className="rot-btn" style={iconBtn} onClick={excluir} aria-label="Excluir aula"><Trash2 size={15} color={C.erro} /></button>}
+      </div>
+
+      {modo === "editar" ? (
+        <input value={fonte.titulo} onChange={(e) => setFonte({ ...fonte, titulo: e.target.value })} onBlur={() => fontes.atualizar(fonte.id, { titulo: fonte.titulo })}
+          style={{ ...input, fontFamily: SERIF, fontSize: 24, fontWeight: 500, marginBottom: 6 }} />
+      ) : <h1 style={{ fontFamily: SERIF, fontSize: 28, fontWeight: 500, margin: "0 0 6px", letterSpacing: -0.4, lineHeight: 1.2 }}>{fonte.titulo}</h1>}
+      <div style={{ fontSize: 13, color: C.sub, marginBottom: 18 }}>Aula de {dataBR(fonte.data)}, {palavras(fonte.texto)} palavras</div>
+
+      <Aviso onFechar={() => setAviso("")}>{aviso}</Aviso>
+
+      {modo === "ler" ? <>
+        <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 14, lineHeight: 1.5 }}>Toque num termo sublinhado para ver o significado. Selecione um trecho para guardar como destaque.</div>
+        <Leitura texto={texto} ctx={ctx} fonte={fonte} />
+        <div style={{ height: 28 }} />
+        <Notas fonteId={fonte.id} />
+      </> : <>
+        {sugestoes.length > 0 && (
+          <div style={{ ...dica, flexDirection: "column", marginBottom: 14 }}>
+            <div style={{ display: "flex", gap: 8, fontWeight: 500 }}><Lightbulb size={15} style={{ flexShrink: 0, marginTop: 2 }} /> Possíveis erros de transcrição</div>
+            {sugestoes.map((s) => (
+              <div key={s.errado} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ flex: 1, minWidth: 160 }}><s style={{ opacity: 0.7 }}>{s.errado}</s> para <b style={{ fontWeight: 500 }}>{s.certo}</b><span style={{ opacity: 0.6 }}> ({s.n}×)</span></span>
+                <button style={{ ...btn, padding: "5px 10px", fontSize: 12 }} disabled={salvando} onClick={() => corrigir(s.errado, s.certo)}><Check size={13} /> Corrigir</button>
+                <button style={{ ...btn2, padding: "5px 10px", fontSize: 12 }} onClick={() => ctx.ignorar(s.errado)}>Está certo</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ ...card, padding: 14, marginBottom: 14 }}>
+          <span style={label}>Ensinar uma correção</span>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input style={{ ...input, flex: "1 1 140px" }} placeholder="Como saiu" value={errado} onChange={(e) => setErrado(e.target.value)} />
+            <input style={{ ...input, flex: "1 1 140px" }} placeholder="Como é o certo" list="termos" value={certo} onChange={(e) => setCerto(e.target.value)} />
+            <datalist id="termos">{ctx.glossario.map((g) => <option key={g.id} value={g.termo} />)}</datalist>
+            <button style={{ ...btn, opacity: errado && certo && !salvando ? 1 : 0.5 }} disabled={!errado || !certo || salvando}
+              onClick={() => { corrigir(errado, certo); setErrado(""); setCerto(""); }}><Check size={15} /> Corrigir</button>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+          {sujo && <button style={btn} disabled={salvando} onClick={() => gravar(texto, "Alterações salvas.")}>{salvando ? <Girando /> : <Save size={15} />} Salvar alterações</button>}
+          <button style={btn2} className="rot-btn" onClick={reaplicar} disabled={salvando}><Wand2 size={15} /> Aplicar glossário</button>
+          <button style={btn2} className="rot-btn" onClick={limparLoops} disabled={salvando}><Repeat size={15} /> Tirar repetições</button>
+          <BotaoPreparar fonte={fonte} desabilitado={sujo || salvando} onPronto={() => { setFonte({ ...fonte, indexada: true }); setAviso("Aula pronta para perguntas."); }} onErro={setAviso} />
+        </div>
+        <textarea style={{ ...input, minHeight: 420, lineHeight: 1.7, fontSize: 15, fontFamily: SERIF }} value={texto} onChange={(e) => setTexto(e.target.value)} />
+      </>}
+    </div>
+  );
+}

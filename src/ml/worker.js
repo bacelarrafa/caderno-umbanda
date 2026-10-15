@@ -1,6 +1,7 @@
 // Roda os modelos fora da tela principal, para o app não travar.
 // Os modelos são baixados do Hugging Face na primeira vez e ficam em cache.
 import { pipeline, env } from "@huggingface/transformers";
+import { cortarNosSilencios, ehSilencio, tirarRepeticoes } from "./limpeza";
 
 env.allowLocalModels = false;
 
@@ -8,6 +9,7 @@ const MODELOS = {
   whisper: {
     rapido: "onnx-community/whisper-base",
     preciso: "onnx-community/whisper-small",
+    maxima: "onnx-community/whisper-large-v3-turbo",
   },
   embed: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
 };
@@ -23,12 +25,18 @@ function progresso(id, etapa) {
   };
 }
 
+async function temFp16() {
+  try { return (await navigator.gpu.requestAdapter())?.features.has("shader-f16"); } catch { return false; }
+}
+
 async function getWhisper(id, qualidade) {
+  if (qualidade === "maxima" && !temGPU) throw new Error("o modelo Máxima precisa de um navegador com WebGPU (Chrome ou Edge no computador)");
   const nome = MODELOS.whisper[qualidade] || MODELOS.whisper.preciso;
   if (!cache[nome]) {
+    const encoder = qualidade === "maxima" && (await temFp16()) ? "fp16" : "fp32";
     cache[nome] = pipeline("automatic-speech-recognition", nome, {
       device: temGPU ? "webgpu" : "wasm",
-      dtype: temGPU ? { encoder_model: "fp32", decoder_model_merged: "q4" } : "q8",
+      dtype: temGPU ? { encoder_model: encoder, decoder_model_merged: "q4" } : "q8",
       progress_callback: progresso(id, "Baixando modelo de transcrição"),
     });
   }
@@ -51,25 +59,28 @@ self.onmessage = async ({ data }) => {
     if (acao === "transcrever") {
       const asr = await getWhisper(id, data.qualidade);
       const audio = data.audio; // Float32Array, 16 kHz, mono
-      const PEDACO = 16000 * 30; // 30 segundos
-      const total = Math.ceil(audio.length / PEDACO);
+      const pedacos = cortarNosSilencios(audio);
+      const total = pedacos.length;
       let texto = "";
       for (let i = 0; i < total; i++) {
-        const parte = audio.subarray(i * PEDACO, (i + 1) * PEDACO);
-        const out = await asr(parte, { language: "portuguese", task: "transcribe" });
-        texto += (texto ? " " : "") + (out.text || "").trim();
+        if (!ehSilencio(pedacos[i])) {
+          const out = await asr(pedacos[i], { language: "portuguese", task: "transcribe", no_repeat_ngram_size: 5 });
+          const parte = tirarRepeticoes((out.text || "").trim());
+          texto += (texto ? " " : "") + parte;
+        }
         self.postMessage({ id, tipo: "parcial", texto, feito: i + 1, total });
       }
-      self.postMessage({ id, tipo: "fim", texto });
+      self.postMessage({ id, tipo: "fim", texto: tirarRepeticoes(texto) });
     }
 
     if (acao === "vetorizar") {
       const embed = await getEmbed(id);
       const vetores = [];
-      for (let i = 0; i < data.textos.length; i++) {
-        const out = await embed(data.textos[i], { pooling: "mean", normalize: true });
-        vetores.push(Array.from(out.data));
-        if (i % 5 === 0) self.postMessage({ id, tipo: "parcial", feito: i + 1, total: data.textos.length });
+      const LOTE = 16;
+      for (let i = 0; i < data.textos.length; i += LOTE) {
+        const out = await embed(data.textos.slice(i, i + LOTE), { pooling: "mean", normalize: true });
+        vetores.push(...out.tolist());
+        self.postMessage({ id, tipo: "parcial", feito: Math.min(i + LOTE, data.textos.length), total: data.textos.length });
       }
       self.postMessage({ id, tipo: "fim", vetores });
     }
