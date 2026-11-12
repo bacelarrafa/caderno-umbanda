@@ -190,6 +190,7 @@ function DetalheAula({ id, ctx, onVoltar }) {
   const [errado, setErrado] = useState("");
   const [certo, setCerto] = useState("");
   const [gerando, setGerando] = useState(false);
+  const [progresso, setProgresso] = useState("");
   const [editEstudo, setEditEstudo] = useState(null);
   const [somando, setSomando] = useState(false);
   const [nivel, setNivel] = useState("completo");
@@ -239,14 +240,14 @@ function DetalheAula({ id, ctx, onVoltar }) {
       if (!ok) return;
       try { sessionStorage.setItem("cienteGemini", "1"); } catch { /* sem armazenamento */ }
     }
-    setGerando(true); setAviso("");
+    setGerando(true); setAviso(""); setProgresso("");
     try {
-      const novo = await fontes.gerarEstudo(fonte.id, nivel);
+      const novo = await fontes.gerarEstudo(fonte.id, nivel, (n, total) => setProgresso(`parte ${n} de ${total}`));
       const f = await fontes.salvarEstudo(fonte, novo);
       setFonte(f); setModo("estudo");
       setAviso("Versão de estudo pronta. Ela pode errar: na dúvida, confira com a transcrição e com a casa.");
     } catch (e) { setAviso(`Não consegui gerar: ${e.message}`); }
-    setGerando(false);
+    setGerando(false); setProgresso("");
   };
 
   const salvarEdicaoEstudo = async () => {
@@ -296,7 +297,7 @@ function DetalheAula({ id, ctx, onVoltar }) {
           <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
             {editEstudo == null ? <>
               <button style={btn2} className="rot-btn" onClick={() => setEditEstudo(fonte.estudo)}><Pencil size={14} /> Editar</button>
-              <button style={btn2} className="rot-btn" onClick={gerarEstudo} disabled={gerando}>{gerando ? <Girando /> : <Sparkles size={14} />} {gerando ? "Gerando, leva até um minuto" : "Gerar de novo"}</button>
+              <button style={btn2} className="rot-btn" onClick={gerarEstudo} disabled={gerando}>{gerando ? <Girando /> : <Sparkles size={14} />} {gerando ? `Gerando${progresso ? ` ${progresso}` : ", leva alguns minutos"}` : "Gerar de novo"}</button>
               <BotaoPreparar fonte={fonte} onPronto={() => { setFonte({ ...fonte, indexada: true }); setAviso("Aula pronta para perguntas."); }} onErro={setAviso} />
               <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontSize: 12, color: C.sub }}>Detalhe ao gerar:</span>
@@ -321,7 +322,7 @@ function DetalheAula({ id, ctx, onVoltar }) {
           <div style={{ ...dica, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
             <Sparkles size={16} style={{ flexShrink: 0 }} />
             <span style={{ flex: "1 1 220px" }}>Transcrição confusa? Gere uma versão de estudo organizada por temas.</span>
-            <button style={{ ...btn, background: C.ouro }} onClick={gerarEstudo} disabled={gerando}>{gerando ? <Girando /> : <Sparkles size={14} />} {gerando ? "Gerando" : "Gerar versão de estudo"}</button>
+            <button style={{ ...btn, background: C.ouro }} onClick={gerarEstudo} disabled={gerando}>{gerando ? <Girando /> : <Sparkles size={14} />} {gerando ? `Gerando${progresso ? ` ${progresso}` : ""}` : "Gerar versão de estudo"}</button>
           </div>
         )}
         <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 14, lineHeight: 1.5 }}>Toque num termo sublinhado para ver o significado. Selecione um trecho para guardar como destaque.</div>
