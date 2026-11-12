@@ -64,23 +64,63 @@ export const fontes = {
     return f;
   },
   // Pedido "simples" (texto puro, sem cabeçalhos extras): o navegador não faz a checagem prévia de CORS.
-  async gerarEstudo(fonteId, nivel = "completo") {
+  // A função divide aulas longas em partes; aqui pedimos uma parte de cada vez e juntamos no fim.
+  async gerarEstudo(fonteId, nivel = "completo", aoAvancar = () => {}) {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) throw new Error("Entre na sua conta de novo.");
-    let r;
-    try {
-      r = await fetch(`${supabaseUrl}/functions/v1/versao-estudo`, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=UTF-8" },
-        body: JSON.stringify({ fonte_id: fonteId, nivel, token: session.access_token, apikey: supabaseChave }),
-      });
-    } catch { throw new Error("Não consegui falar com a função versao-estudo no Supabase."); }
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok || d.erro) throw new Error(d.erro || d.message || `erro ${r.status}`);
-    return d.texto;
+    const pedirParte = async (parte) => {
+      let r;
+      try {
+        r = await fetch(`${supabaseUrl}/functions/v1/versao-estudo`, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=UTF-8" },
+          body: JSON.stringify({ fonte_id: fonteId, nivel, parte, token: session.access_token, apikey: supabaseChave }),
+        });
+      } catch { throw new Error("Não consegui falar com a função versao-estudo no Supabase."); }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.erro) {
+        const e = new Error(d.erro || d.message || `erro ${r.status}`);
+        e.status = r.status;
+        throw e;
+      }
+      return d;
+    };
+    // Se uma parte falhar por demora ou sobrecarga, espera e tenta mais uma vez antes de desistir.
+    const comNovaTentativa = async (parte) => {
+      try { return await pedirParte(parte); }
+      catch (e) {
+        if (![429, 503, 504, 546].includes(e.status)) throw e;
+        await new Promise((ok) => setTimeout(ok, e.status === 429 ? 20000 : 5000));
+        return pedirParte(parte);
+      }
+    };
+    const primeira = await comNovaTentativa(0);
+    const total = primeira.partes || 1;
+    const textos = [primeira.texto];
+    for (let i = 1; i < total; i++) {
+      aoAvancar(i + 1, total);
+      try { textos.push((await comNovaTentativa(i)).texto); }
+      catch (e) { throw new Error(`parte ${i + 1} de ${total}: ${e.message}`); }
+    }
+    return juntarPartes(textos);
   },
   excluir: async (id) => ok(await supabase.from("fontes").delete().eq("id", id)),
 };
+
+// Junta as versões de estudo de cada parte, levando todas as dúvidas para uma única seção no final.
+function juntarPartes(textos) {
+  if (textos.length === 1) return textos[0];
+  const corpo = [];
+  const duvidas = [];
+  for (const t of textos) {
+    const [antes, ...depois] = t.split(/^## Para confirmar com a casa\s*$/m);
+    corpo.push(antes.trim());
+    depois.join("\n").split("\n").map((l) => l.trim()).filter((l) => l.startsWith("? ")).forEach((l) => {
+      if (!duvidas.includes(l)) duvidas.push(l);
+    });
+  }
+  return `${corpo.join("\n\n")}${duvidas.length ? `\n\n## Para confirmar com a casa\n\n${duvidas.join("\n")}` : ""}`;
+}
 
 // Divide o texto em trechos (por página, nas leituras) e grava sem vetores.
 // A busca por palavras já funciona; a busca por sentido entra depois de preparar.
